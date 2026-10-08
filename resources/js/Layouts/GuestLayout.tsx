@@ -1,19 +1,22 @@
-import ApplicationLogo from '@/Components/ApplicationLogo';
-import { Link } from '@inertiajs/react';
 import { PropsWithChildren } from 'react';
+import bgImage from '../../images/auth-bg.jpg';
 
-export default function Guest({ children }: PropsWithChildren) {
+export default function GuestLayout({ children }: PropsWithChildren) {
     return (
-        <div className="flex min-h-screen flex-col items-center bg-gray-100 pt-6 sm:justify-center sm:pt-0">
-            <div>
-                <Link href="/">
-                    <ApplicationLogo className="h-20 w-20 fill-current text-gray-500" />
-                </Link>
-            </div>
+        <div className="relative flex min-h-svh flex-col items-center justify-center p-4 sm:p-6 md:p-10">
+            {/* Background Campus Photo */}
+            <div
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: `url(${bgImage})` }}
+            />
+            {/* Dark overlay for contrast & readability */}
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
 
-            <div className="mt-6 w-full overflow-hidden bg-white px-6 py-4 shadow-md sm:max-w-md sm:rounded-lg">
+            {/* Floating Frosted Glass Card with crisp light typography */}
+            <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/20 bg-zinc-950/75 p-6 shadow-2xl backdrop-blur-xl sm:p-8 text-white">
                 {children}
             </div>
         </div>
     );
 }
+

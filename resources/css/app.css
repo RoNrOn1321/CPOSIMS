@@ -60,11 +60,10 @@
     --accent: 200 100% 42%;
     --accent-foreground: 0 0% 100%;
 
-    /* Keep neutral backgrounds and cards for data readability */
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
 
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);

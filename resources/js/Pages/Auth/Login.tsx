@@ -1,8 +1,14 @@
-import Checkbox from '@/Components/Checkbox';
-import InputError from '@/Components/InputError';
-import InputLabel from '@/Components/InputLabel';
-import PrimaryButton from '@/Components/PrimaryButton';
-import TextInput from '@/Components/TextInput';
+import ApplicationLogo from '@/Components/ApplicationLogo';
+import { Button } from '@/Components/ui/button';
+import { Checkbox } from '@/Components/ui/checkbox';
+import {
+    Field,
+    FieldDescription,
+    FieldError,
+    FieldGroup,
+    FieldLabel,
+} from '@/Components/ui/field';
+import { Input } from '@/Components/ui/input';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEventHandler } from 'react';
@@ -32,79 +38,131 @@ export default function Login({
         <GuestLayout>
             <Head title="Log in" />
 
-            {status && (
-                <div className="mb-4 text-sm font-medium text-green-600">
-                    {status}
-                </div>
-            )}
+            <div className="flex flex-col gap-6">
+                <form onSubmit={submit}>
+                    <FieldGroup>
+                        <div className="flex flex-col items-center gap-2 text-center">
+                            <Link
+                                href="/"
+                                className="flex flex-col items-center gap-2 font-medium transition-transform hover:scale-105"
+                            >
+                                <ApplicationLogo className="h-24 w-auto drop-shadow-md" />
+                                <span className="sr-only">
+                                    Saint Theresa College of Tandag, Inc.
+                                </span>
+                            </Link>
+                            <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
+                                Welcome to CPOSIMS
+                            </h1>
+                            <p className="text-sm text-zinc-300">
+                                Don&apos;t have an account?{' '}
+                                <Link
+                                    href={route('register')}
+                                    className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
+                                >
+                                    Sign up
+                                </Link>
+                            </p>
+                        </div>
 
-            <form onSubmit={submit}>
-                <div>
-                    <InputLabel htmlFor="email" value="Email" />
+                        {status && (
+                            <div className="rounded-md border border-emerald-400/30 bg-emerald-950/60 px-3 py-2 text-sm text-emerald-200">
+                                {status}
+                            </div>
+                        )}
 
-                    <TextInput
-                        id="email"
-                        type="email"
-                        name="email"
-                        value={data.email}
-                        className="mt-1 block w-full"
-                        autoComplete="username"
-                        isFocused={true}
-                        onChange={(e) => setData('email', e.target.value)}
-                    />
+                        <Field>
+                            <FieldLabel htmlFor="email" className="text-sm font-medium text-zinc-200">
+                                Email
+                            </FieldLabel>
+                            <Input
+                                id="email"
+                                type="email"
+                                name="email"
+                                value={data.email}
+                                placeholder="name@example.com"
+                                autoComplete="username"
+                                autoFocus
+                                required
+                                aria-invalid={!!errors.email}
+                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
+                                onChange={(e) => setData('email', e.target.value)}
+                            />
+                            {errors.email && (
+                                <FieldError className="text-xs text-red-400" errors={[{ message: errors.email }]} />
+                            )}
+                        </Field>
 
-                    <InputError message={errors.email} className="mt-2" />
-                </div>
+                        <Field>
+                            <div className="flex items-center justify-between">
+                                <FieldLabel htmlFor="password" className="text-sm font-medium text-zinc-200">
+                                    Password
+                                </FieldLabel>
+                                {canResetPassword && (
+                                    <Link
+                                        href={route('password.request')}
+                                        className="text-xs text-zinc-300 underline underline-offset-4 hover:text-white"
+                                    >
+                                        Forgot password?
+                                    </Link>
+                                )}
+                            </div>
+                            <Input
+                                id="password"
+                                type="password"
+                                name="password"
+                                value={data.password}
+                                placeholder="••••••••"
+                                autoComplete="current-password"
+                                required
+                                aria-invalid={!!errors.password}
+                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
+                                onChange={(e) =>
+                                    setData('password', e.target.value)
+                                }
+                            />
+                            {errors.password && (
+                                <FieldError
+                                    className="text-xs text-red-400"
+                                    errors={[{ message: errors.password }]}
+                                />
+                            )}
+                        </Field>
 
-                <div className="mt-4">
-                    <InputLabel htmlFor="password" value="Password" />
+                        <div className="flex items-center space-x-2">
+                            <Checkbox
+                                id="remember"
+                                checked={data.remember}
+                                className="border-white/30 data-checked:bg-blue-500 data-checked:border-blue-500 data-checked:text-white-950"
+                                onCheckedChange={(checked) =>
+                                    setData('remember', checked === true)
+                                }
+                            />
+                            <label
+                                htmlFor="remember"
+                                className="cursor-pointer text-sm font-medium leading-none text-zinc-200 select-none hover:text-white"
+                            >
+                                Remember me
+                            </label>
+                        </div>
 
-                    <TextInput
-                        id="password"
-                        type="password"
-                        name="password"
-                        value={data.password}
-                        className="mt-1 block w-full"
-                        autoComplete="current-password"
-                        onChange={(e) => setData('password', e.target.value)}
-                    />
+                        <Field>
+                            <Button
+                                type="submit"
+                                className="h-10 w-full bg-[#7a1420] font-semibold text-white shadow-lg transition-all hover:bg-[#921927] hover:shadow-red-950/40 disabled:opacity-50"
+                                disabled={processing}
+                            >
+                                {processing ? 'Logging in...' : 'Login'}
+                            </Button>
+                        </Field>
+                    </FieldGroup>
+                </form>
 
-                    <InputError message={errors.password} className="mt-2" />
-                </div>
-
-                <div className="mt-4 block">
-                    <label className="flex items-center">
-                        <Checkbox
-                            name="remember"
-                            checked={data.remember}
-                            onChange={(e) =>
-                                setData(
-                                    'remember',
-                                    (e.target.checked || false) as false,
-                                )
-                            }
-                        />
-                        <span className="ms-2 text-sm text-gray-600">
-                            Remember me
-                        </span>
-                    </label>
-                </div>
-
-                <div className="mt-4 flex items-center justify-end">
-                    {canResetPassword && (
-                        <Link
-                            href={route('password.request')}
-                            className="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        >
-                            Forgot your password?
-                        </Link>
-                    )}
-
-                    <PrimaryButton className="ms-4" disabled={processing}>
-                        Log in
-                    </PrimaryButton>
-                </div>
-            </form>
+                <p className="px-6 text-center text-xs text-zinc-400">
+                    Saint Theresa College of Tandag, Inc. &bull; CPOSIMS
+                </p>
+            </div>
         </GuestLayout>
     );
 }
+
