@@ -2,31 +2,36 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use OwenIt\Auditing\Contracts\Auditable;
+use Spatie\Permission\Traits\HasRoles; // Spatie Role Management
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable
+class User extends Authenticatable implements Auditable
 {
-    /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, SoftDeletes, HasRoles, \OwenIt\Auditing\Auditable;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
-    protected function casts(): array
+    protected $fillable = [
+        'username', 'password', 'full_name', 'email', 'phone', 'role', 'status'
+    ];
+
+    protected $hidden = [
+        'password',
+    ];
+
+        protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    // Connects a parent user to their children's accounts
+    public function studentAccounts()
+    {
+        return $this->hasMany(StudentAccount::class, 'parent_id');
     }
 }
