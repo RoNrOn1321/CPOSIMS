@@ -1,3 +1,4 @@
+﻿import { confirm as confirmPassword } from '@/routes/password';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import { Button } from '@/Components/ui/button';
 import {
@@ -20,7 +21,7 @@ export default function ConfirmPassword() {
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('password.confirm'), {
+        post(confirmPassword().url, {
             onFinish: () => reset('password'),
         });
     };
@@ -58,7 +59,7 @@ export default function ConfirmPassword() {
                                 type="password"
                                 name="password"
                                 value={data.password}
-                                placeholder="••••••••"
+                                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                 autoComplete="current-password"
                                 autoFocus
                                 required

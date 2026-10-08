@@ -14,9 +14,10 @@ export default {
         extend: {
             colors: {
                 stct: {
-                maroon: '#5c1516',
-                gold: '#d38c28',
-                blue: '#008dd5',
+                    maroon: '#5c1516',
+                    gold: '#d38c28',
+                    blue: '#008dd5',
+                },
             },
             fontFamily: {
                 sans: ['Figtree', ...defaultTheme.fontFamily.sans],

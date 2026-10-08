@@ -10,6 +10,7 @@ import {
 import { Input } from '@/Components/ui/input';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
+import { register, login } from '@/routes';
 import { FormEventHandler } from 'react';
 
 export default function Register() {
@@ -23,7 +24,7 @@ export default function Register() {
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('register'), {
+        post(register().url, {
             onFinish: () => reset('password', 'password_confirmation'),
         });
     };
@@ -51,7 +52,7 @@ export default function Register() {
                             <p className="text-sm text-zinc-300">
                                 Already have an account?{' '}
                                 <Link
-                                    href={route('login')}
+                                    href={login().url}
                                     className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
                                 >
                                     Log in

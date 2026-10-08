@@ -1,4 +1,7 @@
 {
+    "agents": [
+        "claude_code"
+    ],
     "cloud": true,
     "guidelines": true,
     "mcp": true,
@@ -9,6 +12,7 @@
         "deploying-to-cloud",
         "laravel-best-practices",
         "testing-best-practices",
+        "wayfinder-development",
         "inertia-react-development",
         "tailwindcss-development"
     ]

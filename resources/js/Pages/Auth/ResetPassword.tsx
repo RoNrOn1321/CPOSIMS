@@ -1,3 +1,5 @@
+﻿import { store } from '@/routes/password';
+import { login } from '@/routes';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import { Button } from '@/Components/ui/button';
 import {
@@ -29,7 +31,7 @@ export default function ResetPassword({
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('password.store'), {
+        post(store().url, {
             onFinish: () => reset('password', 'password_confirmation'),
         });
     };
@@ -88,7 +90,7 @@ export default function ResetPassword({
                                 type="password"
                                 name="password"
                                 value={data.password}
-                                placeholder="••••••••"
+                                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                 autoComplete="new-password"
                                 autoFocus
                                 required
@@ -115,7 +117,7 @@ export default function ResetPassword({
                                 type="password"
                                 name="password_confirmation"
                                 value={data.password_confirmation}
-                                placeholder="••••••••"
+                                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                 autoComplete="new-password"
                                 required
                                 aria-invalid={!!errors.password_confirmation}
@@ -152,7 +154,7 @@ export default function ResetPassword({
 
                         <div className="text-center text-sm">
                             <Link
-                                href={route('login')}
+                                href={login().url}
                                 className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
                             >
                                 Back to login

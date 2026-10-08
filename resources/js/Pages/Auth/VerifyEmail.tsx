@@ -7,6 +7,8 @@ import {
 } from '@/Components/ui/field';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
+import { send } from '@/routes/verification';
+import { logout } from '@/routes';
 import { FormEventHandler } from 'react';
 
 export default function VerifyEmail({ status }: { status?: string }) {
@@ -15,7 +17,7 @@ export default function VerifyEmail({ status }: { status?: string }) {
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('verification.send'));
+        post(send().url);
     };
 
     return (
@@ -66,7 +68,7 @@ export default function VerifyEmail({ status }: { status?: string }) {
 
                         <div className="text-center text-sm">
                             <Link
-                                href={route('logout')}
+                                href={logout().url}
                                 method="post"
                                 as="button"
                                 className="text-muted-foreground underline underline-offset-4 hover:text-foreground"

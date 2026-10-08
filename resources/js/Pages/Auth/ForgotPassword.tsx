@@ -1,3 +1,5 @@
+﻿import { email } from '@/routes/password';
+import { login } from '@/routes';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import { Button } from '@/Components/ui/button';
 import {
@@ -20,7 +22,7 @@ export default function ForgotPassword({ status }: { status?: string }) {
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('password.email'));
+        post(email().url);
     };
 
     return (
@@ -90,7 +92,7 @@ export default function ForgotPassword({ status }: { status?: string }) {
 
                         <div className="text-center text-sm">
                             <Link
-                                href={route('login')}
+                                href={login().url}
                                 className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
                             >
                                 Back to login

@@ -4,6 +4,8 @@ import NavLink from '@/Components/NavLink';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink';
 import { Link, usePage } from '@inertiajs/react';
 import { PropsWithChildren, ReactNode, useState } from 'react';
+import { dashboard, logout } from '@/routes';
+import { edit as profileEdit } from '@/routes/profile';
 
 export default function Authenticated({
     header,
@@ -28,8 +30,8 @@ export default function Authenticated({
 
                             <div className="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                                 <NavLink
-                                    href={route('dashboard')}
-                                    active={route().current('dashboard')}
+                                    href={dashboard().url}
+                                    active={usePage().url.startsWith('/dashboard')}
                                 >
                                     Dashboard
                                 </NavLink>
@@ -65,12 +67,12 @@ export default function Authenticated({
 
                                     <Dropdown.Content>
                                         <Dropdown.Link
-                                            href={route('profile.edit')}
+                                            href={profileEdit().url}
                                         >
                                             Profile
                                         </Dropdown.Link>
                                         <Dropdown.Link
-                                            href={route('logout')}
+                                            href={logout().url}
                                             method="post"
                                             as="button"
                                         >
@@ -132,8 +134,8 @@ export default function Authenticated({
                 >
                     <div className="space-y-1 pb-3 pt-2">
                         <ResponsiveNavLink
-                            href={route('dashboard')}
-                            active={route().current('dashboard')}
+                            href={dashboard().url}
+                            active={usePage().url.startsWith('/dashboard')}
                         >
                             Dashboard
                         </ResponsiveNavLink>
@@ -150,12 +152,12 @@ export default function Authenticated({
                         </div>
 
                         <div className="mt-3 space-y-1">
-                            <ResponsiveNavLink href={route('profile.edit')}>
+                            <ResponsiveNavLink href={profileEdit().url}>
                                 Profile
                             </ResponsiveNavLink>
                             <ResponsiveNavLink
                                 method="post"
-                                href={route('logout')}
+                                href={logout().url}
                                 as="button"
                             >
                                 Log Out

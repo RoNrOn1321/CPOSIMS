@@ -3,7 +3,6 @@ import { Button } from '@/Components/ui/button';
 import { Checkbox } from '@/Components/ui/checkbox';
 import {
     Field,
-    FieldDescription,
     FieldError,
     FieldGroup,
     FieldLabel,
@@ -12,6 +11,8 @@ import { Input } from '@/Components/ui/input';
 import GuestLayout from '@/Layouts/GuestLayout';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { FormEventHandler } from 'react';
+import { login, register } from '@/routes';
+import { request as requestPassword } from '@/routes/password';
 
 export default function Login({
     status,
@@ -29,7 +30,7 @@ export default function Login({
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
 
-        post(route('login'), {
+        post(login().url, {
             onFinish: () => reset('password'),
         });
     };
@@ -57,7 +58,7 @@ export default function Login({
                             <p className="text-sm text-zinc-300">
                                 Don&apos;t have an account?{' '}
                                 <Link
-                                    href={route('register')}
+                                    href={register().url}
                                     className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
                                 >
                                     Sign up
@@ -100,7 +101,7 @@ export default function Login({
                                 </FieldLabel>
                                 {canResetPassword && (
                                     <Link
-                                        href={route('password.request')}
+                                        href={requestPassword().url}
                                         className="text-xs text-zinc-300 underline underline-offset-4 hover:text-white"
                                     >
                                         Forgot password?
@@ -165,4 +166,3 @@ export default function Login({
         </GuestLayout>
     );
 }
-
