@@ -1,0 +1,119 @@
+erDiagram
+    USERS ||--o{ STUDENT_ACCOUNTS : "parent of (parent_id)"
+    USERS ||--o{ TRANSACTIONS : "processes as cashier (cashier_id)"
+    USERS ||--o{ BALANCE_TOPUPS : "facilitates topup (cashier_id)"
+    USERS ||--o{ INVENTORY_LOGS : "performed by (user_id)"
+
+    STUDENT_ACCOUNTS ||--o{ TRANSACTIONS : "charges cashless payments (student_account_id)"
+    STUDENT_ACCOUNTS ||--o{ BALANCE_TOPUPS : "receives credit into balance (student_account_id)"
+
+    CATEGORIES ||--o{ PRODUCTS : "groups (category_id)"
+    PRODUCTS ||--o{ TRANSACTION_DETAILS : "purchased item (product_id)"
+    PRODUCTS ||--o{ INVENTORY_LOGS : "stock adjustments (product_id)"
+
+    TRANSACTIONS ||--|{ TRANSACTION_DETAILS : "contains line items (transaction_id)"
+
+    USERS {
+        bigint id PK
+        string username UK
+        string password
+        string full_name
+        string email UK
+        string phone
+        enum role "admin, cashier, parent, faculty, student"
+        enum status "active, inactive"
+        string remember_token
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    STUDENT_ACCOUNTS {
+        bigint id PK
+        string student_id_number UK
+        string rfid_uid UK
+        string first_name
+        string last_name
+        string grade_level
+        string section
+        bigint parent_id FK "nullable -> users.id"
+        decimal current_balance "10,2 default 0.00"
+        decimal daily_spending_limit "10,2 default 200.00"
+        boolean is_spending_limited "default true"
+        enum status "active, suspended, lost_card, inactive"
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    CATEGORIES {
+        bigint id PK
+        string name UK
+        text description
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    PRODUCTS {
+        bigint id PK
+        bigint category_id FK "nullable -> categories.id"
+        string barcode UK "nullable for scanner"
+        string name
+        decimal price "10,2"
+        decimal cost "10,2 default 0.00"
+        int stock_quantity "default 0"
+        int reorder_level "default 10"
+        enum status "active, inactive"
+        timestamp practical_created_at
+        timestamp updated_at
+        timestamp deleted_at
+    }
+
+    TRANSACTIONS {
+        bigint id PK
+        string receipt_number UK
+        bigint cashier_id FK "-> users.id"
+        bigint student_account_id FK "nullable -> student_accounts.id"
+        decimal total_amount "10,2"
+        enum payment_method "cash, cashless"
+        decimal amount_tendered "10,2"
+        decimal change_amount "10,2 default 0.00"
+        enum status "completed, voided"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    TRANSACTION_DETAILS {
+        bigint id PK
+        bigint transaction_id FK "-> transactions.id (CASCADE)"
+        bigint product_id FK "-> products.id"
+        int quantity
+        decimal unit_price "10,2"
+        decimal subtotal "10,2"
+    }
+
+    BALANCE_TOPUPS {
+        bigint id PK
+        bigint student_account_id FK "-> student_accounts.id"
+        bigint cashier_id FK "-> users.id"
+        decimal amount "10,2"
+        decimal previous_balance "10,2"
+        decimal new_balance "10,2"
+        string reference_number
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    INVENTORY_LOGS {
+        bigint id PK
+        bigint product_id FK "-> products.id"
+        bigint user_id FK "-> users.id"
+        enum action "restock, sale, adjustment, void"
+        int quantity_changed
+        int previous_stock
+        int new_stock
+        string remarks
+        timestamp created_at
+        timestamp updated_at
+    }

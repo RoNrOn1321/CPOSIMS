@@ -12,16 +12,16 @@ return new class extends Migration
     public function up(): void
     {
         // 8. create_balance_topups_table.php
-Schema::create('balance_topups', function (Blueprint $table) {
-    $table->id();
-    $table->foreignId('student_account_id')->constrained('student_accounts');
-    $table->foreignId('cashier_id')->constrained('users');
-    $table->decimal('amount', 10, 2);
-    $table->decimal('previous_balance', 10, 2);
-    $table->decimal('new_balance', 10, 2);
-    $table->string('reference_number', 50)->nullable();
-    $table->timestamps();
-});
+        Schema::create('balance_topups', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('student_account_id')->constrained('student_accounts');
+            $table->foreignId('cashier_id')->constrained('users');
+            $table->decimal('amount', 10, 2);
+            $table->decimal('previous_balance', 10, 2);
+            $table->decimal('new_balance', 10, 2);
+            $table->string('reference_number', 50)->nullable();
+            $table->timestamps();
+        });
     }
 
     /**

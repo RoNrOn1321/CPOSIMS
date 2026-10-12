@@ -10,8 +10,8 @@ class BalanceTopup extends Model implements Auditable
     use \OwenIt\Auditing\Auditable;
 
     protected $fillable = [
-        'student_account_id', 'cashier_id', 'amount', 
-        'previous_balance', 'new_balance', 'reference_number'
+        'student_account_id', 'cashier_id', 'amount',
+        'previous_balance', 'new_balance', 'reference_number',
     ];
 
     public function studentAccount()

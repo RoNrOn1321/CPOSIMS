@@ -1,23 +1,278 @@
 import React from 'react';
+import { 
+  LayoutDashboard, 
+  Receipt, 
+  Sliders, 
+  ShieldAlert, 
+  CreditCard, 
+  LogOut, 
+  Bell, 
+  User, 
+  ChevronDown, 
+  Package, 
+  FileText, 
+  Settings,
+  Sparkles,
+  ExternalLink
+} from 'lucide-react';
+import { Link } from '@inertiajs/react';
+import { logout } from '@/routes';
+import { Badge } from '@/Components/ui/badge';
+import { Button } from '@/Components/ui/button';
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+interface AdminLayoutProps {
+  children: React.ReactNode;
+  portal?: 'parent' | 'admin';
+  title?: string;
+  activeNav?: string;
+  onNavigate?: (navId: string) => void;
+  onTopUpClick?: () => void;
+  unreadNotificationsCount?: number;
+}
+
+export default function AdminLayout({ 
+  children,
+  portal = 'parent',
+  title,
+  activeNav = 'dashboard',
+  onNavigate,
+  onTopUpClick,
+  unreadNotificationsCount = 2,
+}: AdminLayoutProps) {
+  const isParent = portal === 'parent';
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-stct-maroon text-white p-6">
-        <h2 className="text-2xl font-bold mb-8">Admin Panel</h2>
-        <nav className="space-y-4">
-          <a href="#" className="block py-2 px-4 rounded hover:bg-white/10">Dashboard</a>
-          <a href="#" className="block py-2 px-4 rounded bg-white/20">Products</a>
-          <a href="#" className="block py-2 px-4 rounded hover:bg-white/10">Audit Logs</a>
-          <a href="#" className="block py-2 px-4 rounded hover:bg-white/10">Settings</a>
-        </nav>
-      </aside>
+    <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans antialiased selection:bg-[#5c1516] selection:text-white">
+      {/* Top Universal Header Bar */}
+      <header className="h-16 bg-[#5c1516] text-white flex items-center justify-between px-6 shadow-md z-30 sticky top-0 border-b border-amber-900/30">
+        {/* Left: Branding with School Logo */}
+        <div className="flex items-center gap-4">
+          <Link href="/parent/dashboard" className="flex items-center gap-3 group">
+            <div className="w-10 h-10 p-1 bg-white rounded-xl shadow-md flex items-center justify-center overflow-hidden ring-2 ring-amber-400/40 group-hover:scale-105 transition-transform">
+              <img 
+                src="/images/logo.png" 
+                alt="STCT Logo" 
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-base tracking-tight text-white drop-shadow-sm leading-tight">
+                  CPOSIMS
+                </span>
+                <Badge className="bg-amber-400 text-amber-950 font-black text-[10px] px-1.5 py-0 border-0">
+                  {isParent ? 'PARENT PORTAL' : 'ADMIN PANEL'}
+                </Badge>
+              </div>
+              <span className="text-[11px] text-amber-200/80 font-medium hidden sm:inline">
+                Saint Theresa College of Tandag, Inc.
+              </span>
+            </div>
+          </Link>
+        </div>
 
-      {/* Main Content */}
-      <main className="flex-1 p-8">
-        {children}
-      </main>
+        {/* Right: Quick Actions, Role Info & Logout */}
+        <div className="flex items-center gap-3">
+          {/* Quick POS Access for testing/staff */}
+          <Link
+            href="/pos"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold border border-white/15 transition-all"
+          >
+            <span>POS Register</span>
+            <ExternalLink size={13} />
+          </Link>
+
+          {/* Top-up CTA for parents */}
+          {isParent && onTopUpClick && (
+            <Button
+              size="sm"
+              onClick={onTopUpClick}
+              className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-extrabold text-xs h-9 px-3.5 rounded-xl shadow-sm flex items-center gap-1.5"
+            >
+              <CreditCard size={15} />
+              <span>Top-Up RFID</span>
+            </Button>
+          )}
+
+          {/* Notifications Indicator */}
+          <button 
+            type="button"
+            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center relative transition-colors"
+            title="Notifications"
+          >
+            <Bell size={17} />
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-400 rounded-full ring-2 ring-[#5c1516]" />
+            )}
+          </button>
+
+          {/* User Profile Capsule */}
+          <div className="flex items-center gap-2.5 pl-3 border-l border-white/20">
+            <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-300/40 text-amber-300 font-bold text-xs flex items-center justify-center shadow-inner">
+              {isParent ? 'PD' : 'AD'}
+            </div>
+            <div className="hidden lg:flex flex-col text-left">
+              <span className="text-xs font-bold text-white leading-tight">
+                {isParent ? 'Mrs. Elena Dela Cruz' : 'Administrator'}
+              </span>
+              <span className="text-[10px] text-amber-300/80">
+                {isParent ? 'Parent ID: #P-2024-88' : 'Super Admin'}
+              </span>
+            </div>
+
+            {/* Logout Button */}
+            <Link
+              href={logout().url}
+              method="post"
+              as="button"
+              title="Sign Out"
+              className="p-2 rounded-xl bg-white/10 hover:bg-red-600 text-white/80 hover:text-white transition-colors cursor-pointer ml-1"
+            >
+              <LogOut size={16} />
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Shell with Sidebar and View Body */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Modern Sidebar Rail */}
+        <aside className="w-64 bg-white border-r border-slate-200/90 flex flex-col justify-between p-4 shadow-xs z-10 shrink-0">
+          <div className="space-y-6">
+            {/* Context Badge */}
+            <div className="p-3 bg-gradient-to-br from-red-50 to-amber-50/50 border border-red-100/80 rounded-2xl flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#5c1516] text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0">
+                <Sparkles size={18} className="text-amber-300" />
+              </div>
+              <div className="overflow-hidden">
+                <h4 className="font-extrabold text-xs text-slate-800 leading-tight truncate">
+                  {isParent ? 'Family Dashboard' : 'Management Center'}
+                </h4>
+                <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                  {isParent ? '2 Enrolled Students' : 'System Administration'}
+                </p>
+              </div>
+            </div>
+
+            {/* Navigation Menu */}
+            <nav className="space-y-1">
+              {isParent ? (
+                <>
+                  <SidebarNavItem 
+                    icon={<LayoutDashboard size={18} />} 
+                    label="Overview & Balance" 
+                    active={activeNav === 'dashboard' || activeNav === 'overview'}
+                    onClick={() => onNavigate?.('overview')}
+                  />
+                  <SidebarNavItem 
+                    icon={<Receipt size={18} />} 
+                    label="Meal History" 
+                    active={activeNav === 'history'}
+                    onClick={() => onNavigate?.('history')}
+                  />
+                  <SidebarNavItem 
+                    icon={<Sliders size={18} />} 
+                    label="Daily Spending Limits" 
+                    active={activeNav === 'limits'}
+                    onClick={() => onNavigate?.('limits')}
+                  />
+                  <SidebarNavItem 
+                    icon={<ShieldAlert size={18} />} 
+                    label="Dietary Restrictions" 
+                    active={activeNav === 'restrictions'}
+                    onClick={() => onNavigate?.('restrictions')}
+                  />
+                </>
+              ) : (
+                <>
+                  <SidebarNavItem 
+                    icon={<LayoutDashboard size={18} />} 
+                    label="Dashboard" 
+                    active={activeNav === 'dashboard'}
+                    href="/admin/products"
+                  />
+                  <SidebarNavItem 
+                    icon={<Package size={18} />} 
+                    label="Products & Inventory" 
+                    active={activeNav === 'products'}
+                    href="/admin/products"
+                  />
+                  <SidebarNavItem 
+                    icon={<FileText size={18} />} 
+                    label="Audit Logs" 
+                    active={activeNav === 'audit'}
+                    href="/admin/audit-logs"
+                  />
+                  <SidebarNavItem 
+                    icon={<Settings size={18} />} 
+                    label="System Settings" 
+                    active={activeNav === 'settings'}
+                  />
+                </>
+              )}
+            </nav>
+          </div>
+
+          {/* Bottom Card for Helpline / Support */}
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span>Canteen Office</span>
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-emerald-300 text-emerald-700 bg-emerald-50">
+                Open (7AM - 5PM)
+              </Badge>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Have concerns about dietary restrictions or RFID cards? Call local #104.
+            </p>
+          </div>
+        </aside>
+
+        {/* Dynamic Content Pane */}
+        <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50/60">
+          <div className="max-w-7xl mx-auto space-y-6">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
+}
+
+function SidebarNavItem({
+  icon,
+  label,
+  active = false,
+  onClick,
+  href,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  href?: string;
+}) {
+  const content = (
+    <div
+      onClick={onClick}
+      className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 cursor-pointer ${
+        active
+          ? 'bg-[#5c1516] text-white shadow-md shadow-red-950/20'
+          : 'text-slate-600 hover:bg-red-50/70 hover:text-[#5c1516]'
+      }`}
+    >
+      <span className={active ? 'text-amber-300' : 'text-slate-400 group-hover:text-[#5c1516]'}>
+        {icon}
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+
+  if (href) {
+    return <Link href={href} className="block">{content}</Link>;
+  }
+
+  return content;
 }

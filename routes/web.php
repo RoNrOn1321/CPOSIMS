@@ -30,6 +30,10 @@ Route::get('/parent/dashboard', function () {
 })->name('parent.dashboard');
 
 // Admin Panel Routes
+Route::get('/admin', function () {
+    return redirect()->route('admin.products.index');
+});
+
 Route::prefix('admin')->name('admin.')->group(function () {
     Route::get('/products', function () {
         return Inertia::render('Admin/Products/Index');

@@ -12,13 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         // 3. create_categories_table.php
-Schema::create('categories', function (Blueprint $table) {
-    $table->id();
-    $table->string('name', 50)->unique();
-    $table->text('description')->nullable();
-    $table->timestamps();
-    $table->softDeletes();
-});
+        Schema::create('categories', function (Blueprint $table) {
+            $table->id();
+            $table->string('name', 50)->unique();
+            $table->text('description')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+        });
     }
 
     /**
