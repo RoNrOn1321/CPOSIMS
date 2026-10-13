@@ -104,6 +104,7 @@ app/
         RegisteredUserController.php
         VerifyEmailController.php
       Controller.php
+      PosCheckoutController.php
       ProfileController.php
     Middleware/
       EnsureUserIsActive.php
@@ -111,6 +112,7 @@ app/
     Requests/
       Auth/
         LoginRequest.php
+      PosCheckoutRequest.php
       ProfileUpdateRequest.php
   Models/
     BalanceTopup.php
@@ -146,6 +148,7 @@ database/
     CategoryFactory.php
     InventoryLogFactory.php
     ProductFactory.php
+    StudentAccountFactory.php
     TransactionDetailFactory.php
     TransactionFactory.php
     UserFactory.php
@@ -363,6 +366,8 @@ tests/
       PasswordUpdateTest.php
       RegistrationTest.php
       RoleBasedAccessControlTest.php
+    POS/
+      CheckoutTest.php
     ExampleTest.php
     ModelRelationshipsTest.php
     ProfileTest.php
@@ -393,215 +398,363 @@ vite.config.js
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/Http/Middleware/EnsureUserIsActive.php">
+<file path="app/Http/Controllers/PosCheckoutController.php">
 <?php
 
-namespace App\Http\Middleware;
+namespace App\Http\Controllers;
 
-use Closure;
-use Illuminate\Http\Request;
+use App\Http\Requests\PosCheckoutRequest;
+use App\Models\InventoryLog;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
-use Symfony\Component\HttpFoundation\Response;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
-class EnsureUserIsActive
+class PosCheckoutController extends Controller
 {
     /**
-     * Handle an incoming request.
-     *
-     * @param  Closure(Request): (Response)  $next
+     * Handle the POS checkout transaction request.
      */
-    public function handle(Request $request, Closure $next): Response
+    public function __invoke(PosCheckoutRequest $request): JsonResponse|RedirectResponse
     {
-        if (Auth::check() && ! Auth::user()->isActive()) {
-            Auth::guard('web')->logout();
+        return DB::transaction(function () use ($request) {
+            $paymentMethod = $request->validated('payment_method');
+            $cartItems = $request->validated('items');
+            $amountTendered = (float) $request->validated('amount_tendered');
+            $cashierId = Auth::id();
 
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
+            // Step A: Product & Inventory Validation with Pessimistic Row Locking
+            $totalAmount = 0.00;
+            $processedItems = [];
 
-            return redirect()->route('login')->withErrors([
-                'email' => __('Your account has been deactivated. Please contact the administrator.'),
+            // Aggregate quantities by product_id to validate against concurrent inventory
+            $requestedQuantities = [];
+            foreach ($cartItems as $item) {
+                $productId = $item['product_id'];
+                $requestedQuantities[$productId] = ($requestedQuantities[$productId] ?? 0) + (int) $item['quantity'];
+            }
+
+            foreach ($cartItems as $item) {
+                /** @var Product|null $product */
+                $product = Product::where('id', $item['product_id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $product) {
+                    abort(422, "Product ID {$item['product_id']} does not exist.");
+                }
+
+                if ($product->stock_quantity < $requestedQuantities[$product->id]) {
+                    abort(422, "Insufficient stock for product: {$product->name}. Current stock: {$product->stock_quantity}.");
+                }
+
+                $quantity = (int) $item['quantity'];
+                $unitPrice = (float) $product->price;
+                $subtotal = round($unitPrice * $quantity, 2);
+                $totalAmount = round($totalAmount + $subtotal, 2);
+
+                $processedItems[] = [
+                    'product' => $product,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ];
+            }
+
+            // Step B: Student Account & RFID Validation (If Cashless)
+            $student = null;
+            $studentAccountId = null;
+            $changeAmount = 0.00;
+
+            if ($paymentMethod === 'cashless') {
+                $rfidUid = $request->validated('rfid_uid');
+
+                /** @var StudentAccount|null $student */
+                $student = StudentAccount::where('rfid_uid', $rfidUid)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $student) {
+                    abort(404, 'Student account not found for provided RFID.');
+                }
+
+                if (in_array($student->status, ['lost_card', 'suspended', 'inactive'], true)) {
+                    abort(403, "Student account is {$student->status}. Transaction blocked.");
+                }
+
+                // Enforce Daily Spending Limits
+                if ($student->is_spending_limited) {
+                    $spentToday = (float) Transaction::where('student_account_id', $student->id)
+                        ->where('status', 'completed')
+                        ->whereDate('created_at', today())
+                        ->sum('total_amount');
+
+                    if (round($spentToday + $totalAmount, 2) > (float) $student->daily_spending_limit) {
+                        abort(403, 'Daily transaction limit exceeded.');
+                    }
+                }
+
+                // Enforce Stored-Value Balance
+                if ((float) $student->current_balance < $totalAmount) {
+                    abort(403, 'Insufficient balance.');
+                }
+
+                // Deduct Balance
+                $student->decrement('current_balance', $totalAmount);
+
+                $studentAccountId = $student->id;
+                $amountTendered = $totalAmount;
+                $changeAmount = 0.00;
+            } else {
+                // Cash Payment Validation
+                if ($amountTendered < $totalAmount) {
+                    abort(422, 'Amount tendered is less than total payable amount.');
+                }
+
+                $changeAmount = round($amountTendered - $totalAmount, 2);
+            }
+
+            // Step C: Record the Master Transaction
+            $datePart = now()->format('Ymd');
+            $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
+            while (Transaction::where('receipt_number', $receiptNumber)->exists()) {
+                $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
+            }
+
+            $transaction = Transaction::create([
+                'receipt_number' => $receiptNumber,
+                'cashier_id' => $cashierId,
+                'student_account_id' => $studentAccountId,
+                'total_amount' => $totalAmount,
+                'payment_method' => $paymentMethod,
+                'amount_tendered' => $amountTendered,
+                'change_amount' => $changeAmount,
+                'status' => 'completed',
             ]);
-        }
 
-        return $next($request);
+            // Step D: Itemize Receipt & Update Inventory
+            $receiptItems = [];
+            foreach ($processedItems as $itemData) {
+                /** @var Product $product */
+                $product = $itemData['product'];
+                $quantity = $itemData['quantity'];
+                $unitPrice = $itemData['unit_price'];
+                $subtotal = $itemData['subtotal'];
+
+                TransactionDetail::create([
+                    'transaction_id' => $transaction->id,
+                    'product_id' => $product->id,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ]);
+
+                $previousStock = $product->stock_quantity;
+                $product->decrement('stock_quantity', $quantity);
+                $newStock = $previousStock - $quantity;
+                $product->stock_quantity = $newStock;
+
+                InventoryLog::create([
+                    'product_id' => $product->id,
+                    'user_id' => $cashierId,
+                    'action' => 'sale',
+                    'quantity_changed' => $quantity,
+                    'previous_stock' => $previousStock,
+                    'new_stock' => $newStock,
+                    'remarks' => "POS Receipt #{$receiptNumber}",
+                ]);
+
+                $receiptItems[] = [
+                    'product_id' => $product->id,
+                    'name' => $product->name,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ];
+            }
+
+            // Step E: Response Data for Thermal Printer & Cash Drawer
+            $receiptData = [
+                'transaction_id' => $transaction->id,
+                'receipt_number' => $transaction->receipt_number,
+                'created_at' => $transaction->created_at->toDateTimeString(),
+                'cashier' => Auth::user()?->full_name ?? Auth::user()?->username,
+                'payment_method' => $paymentMethod,
+                'total_amount' => $totalAmount,
+                'amount_tendered' => $amountTendered,
+                'change_amount' => $changeAmount,
+                'student' => $student ? [
+                    'id' => $student->id,
+                    'name' => "{$student->first_name} {$student->last_name}",
+                    'student_id_number' => $student->student_id_number,
+                    'remaining_balance' => (float) $student->current_balance,
+                ] : null,
+                'items' => $receiptItems,
+            ];
+
+            if ($request->wantsJson() && ! $request->header('X-Inertia')) {
+                return response()->json([
+                    'message' => 'Checkout completed successfully.',
+                    'transaction_id' => $transaction->id,
+                    'receipt' => $receiptData,
+                ], 201);
+            }
+
+            return redirect()->route('pos.index')->with([
+                'success' => 'Checkout completed successfully.',
+                'transaction_id' => $transaction->id,
+                'receipt' => $receiptData,
+            ]);
+        });
     }
 }
 </file>
 
-<file path="database/seeders/RolesAndPermissionsSeeder.php">
+<file path="app/Http/Requests/PosCheckoutRequest.php">
 <?php
 
-namespace Database\Seeders;
+namespace App\Http\Requests;
+
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
+
+class PosCheckoutRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {
+        return [
+            'payment_method' => ['required', 'string', 'in:cash,cashless'],
+            'rfid_uid' => ['required_if:payment_method,cashless', 'nullable', 'string'],
+            'amount_tendered' => ['required', 'numeric', 'min:0'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+        ];
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'rfid_uid.required_if' => 'The RFID UID is required for cashless payment transactions.',
+            'items.required' => 'The cart must contain at least one item.',
+            'items.min' => 'The cart must contain at least one item.',
+            'items.*.product_id.exists' => 'One or more selected products do not exist in the inventory.',
+            'items.*.quantity.min' => 'Item quantity must be at least 1.',
+        ];
+    }
+}
+</file>
+
+<file path="database/factories/StudentAccountFactory.php">
+<?php
+
+namespace Database\Factories;
 
 use App\Models\StudentAccount;
 use App\Models\User;
-use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
-use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
-use Spatie\Permission\PermissionRegistrar;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
-class RolesAndPermissionsSeeder extends Seeder
+/**
+ * @extends Factory<StudentAccount>
+ */
+class StudentAccountFactory extends Factory
 {
     /**
-     * Run the database seeds.
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
      */
-    public function run(): void
+    public function definition(): array
     {
-        // Reset cached roles and permissions
-        app()[PermissionRegistrar::class]->forgetCachedPermissions();
-
-        // 1. Define Permissions
-        $permissions = [
-            // Admin permissions
-            'access-admin',
-            'manage-products',
-            'manage-users',
-            'manage-inventory',
-            'view-audit-logs',
-            'view-reports',
-
-            // POS / Cashier permissions
-            'access-pos',
-            'process-sales',
-            'topup-balance',
-            'view-products',
-
-            // Parent Portal permissions
-            'access-parent-portal',
-            'view-student-accounts',
-            'manage-student-limits',
-
-            // General / Student / Faculty permissions
-            'access-portal',
-            'view-own-balance',
+        return [
+            'student_id_number' => fake()->unique()->numerify('2026-####'),
+            'rfid_uid' => fake()->unique()->regexify('[A-F0-9]{14}'),
+            'first_name' => fake()->firstName(),
+            'last_name' => fake()->lastName(),
+            'grade_level' => 'Grade 6',
+            'section' => 'St. Therese',
+            'parent_id' => User::factory()->parent(),
+            'current_balance' => 500.00,
+            'daily_spending_limit' => 200.00,
+            'is_spending_limited' => true,
+            'status' => 'active',
         ];
+    }
 
-        foreach ($permissions as $permission) {
-            Permission::findOrCreate($permission, 'web');
-        }
-
-        // 2. Define Roles and Assign Permissions
-        $adminRole = Role::findOrCreate('admin', 'web');
-        $adminRole->syncPermissions(Permission::all());
-
-        $cashierRole = Role::findOrCreate('cashier', 'web');
-        $cashierRole->syncPermissions([
-            'access-pos',
-            'process-sales',
-            'topup-balance',
-            'view-products',
+    /**
+     * Indicate that the student account card is lost.
+     */
+    public function lostCard(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'lost_card',
         ]);
+    }
 
-        $parentRole = Role::findOrCreate('parent', 'web');
-        $parentRole->syncPermissions([
-            'access-parent-portal',
-            'view-student-accounts',
-            'manage-student-limits',
-            'topup-balance',
+    /**
+     * Indicate that the student account is suspended.
+     */
+    public function suspended(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'suspended',
         ]);
+    }
 
-        $facultyRole = Role::findOrCreate('faculty', 'web');
-        $facultyRole->syncPermissions([
-            'access-portal',
-            'view-own-balance',
+    /**
+     * Indicate that the student account is inactive.
+     */
+    public function inactive(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'inactive',
         ]);
+    }
 
-        $studentRole = Role::findOrCreate('student', 'web');
-        $studentRole->syncPermissions([
-            'access-portal',
-            'view-own-balance',
+    /**
+     * Indicate that the student account has no spending limit.
+     */
+    public function unlimited(): static
+    {
+        return $this->state(fn () => [
+            'is_spending_limited' => false,
         ]);
-
-        // 3. Seed Default System Users
-        $admin = User::firstOrCreate(
-            ['username' => 'admin'],
-            [
-                'full_name' => 'System Administrator',
-                'email' => 'admin@stct.edu.ph',
-                'phone' => '09123456780',
-                'role' => 'admin',
-                'status' => 'active',
-                'password' => Hash::make('password'),
-            ]
-        );
-        $admin->syncRoles([$adminRole]);
-
-        $cashier = User::firstOrCreate(
-            ['username' => 'cashier'],
-            [
-                'full_name' => 'Canteen Cashier',
-                'email' => 'cashier@stct.edu.ph',
-                'phone' => '09123456781',
-                'role' => 'cashier',
-                'status' => 'active',
-                'password' => Hash::make('password'),
-            ]
-        );
-        $cashier->syncRoles([$cashierRole]);
-
-        $parent = User::firstOrCreate(
-            ['username' => 'parent'],
-            [
-                'full_name' => 'Parent Guardian',
-                'email' => 'parent@stct.edu.ph',
-                'phone' => '09123456782',
-                'role' => 'parent',
-                'status' => 'active',
-                'password' => Hash::make('password'),
-            ]
-        );
-        $parent->syncRoles([$parentRole]);
-
-        $faculty = User::firstOrCreate(
-            ['username' => 'faculty'],
-            [
-                'full_name' => 'Faculty Member',
-                'email' => 'faculty@stct.edu.ph',
-                'phone' => '09123456783',
-                'role' => 'faculty',
-                'status' => 'active',
-                'password' => Hash::make('password'),
-            ]
-        );
-        $faculty->syncRoles([$facultyRole]);
-
-        $student = User::firstOrCreate(
-            ['username' => 'student'],
-            [
-                'full_name' => 'Student User',
-                'email' => 'student@stct.edu.ph',
-                'phone' => '09123456784',
-                'role' => 'student',
-                'status' => 'active',
-                'password' => Hash::make('password'),
-            ]
-        );
-        $student->syncRoles([$studentRole]);
-
-        // 4. Seed a linked student account for the parent
-        StudentAccount::firstOrCreate(
-            ['student_id_number' => '2026-0001'],
-            [
-                'rfid_uid' => 'E28011700000020',
-                'first_name' => 'Theresian',
-                'last_name' => 'Student',
-                'grade_level' => 'Grade 10',
-                'section' => 'St. Theresa',
-                'parent_id' => $parent->id,
-                'current_balance' => 350.00,
-                'daily_spending_limit' => 200.00,
-                'is_spending_limited' => true,
-                'status' => 'active',
-            ]
-        );
     }
 }
 </file>
 
-<file path="tests/Feature/Auth/RoleBasedAccessControlTest.php">
+<file path="tests/Feature/POS/CheckoutTest.php">
 <?php
 
+use App\Models\InventoryLog;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
 
@@ -609,104 +762,324 @@ beforeEach(function () {
     $this->seed(RolesAndPermissionsSeeder::class);
 });
 
-test('roles and permissions are automatically assigned to users matching their role enum', function () {
-    $admin = User::factory()->admin()->create();
+it('processes a valid cashless transaction and deducts balance', function () {
     $cashier = User::factory()->cashier()->create();
-    $parent = User::factory()->parent()->create();
-    $faculty = User::factory()->faculty()->create();
-    $student = User::factory()->student()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 200.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
+    ]);
 
-    expect($admin->hasRole('admin'))->toBeTrue()
-        ->and($admin->can('access-admin'))->toBeTrue()
-        ->and($cashier->hasRole('cashier'))->toBeTrue()
-        ->and($cashier->can('access-pos'))->toBeTrue()
-        ->and($cashier->can('access-admin'))->toBeFalse()
-        ->and($parent->hasRole('parent'))->toBeTrue()
-        ->and($parent->can('access-parent-portal'))->toBeTrue()
-        ->and($faculty->hasRole('faculty'))->toBeTrue()
-        ->and($student->hasRole('student'))->toBeTrue();
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('message', 'Checkout completed successfully.')
+        ->assertJsonPath('receipt.total_amount', 100)
+        ->assertJsonPath('receipt.payment_method', 'cashless')
+        ->assertJsonPath('receipt.student.remaining_balance', 400);
+
+    expect($student->fresh()->current_balance)->toBe('400.00')
+        ->and($product->fresh()->stock_quantity)->toBe(8);
+
+    $this->assertDatabaseHas('transactions', [
+        'cashier_id' => $cashier->id,
+        'student_account_id' => $student->id,
+        'total_amount' => 100.00,
+        'payment_method' => 'cashless',
+        'amount_tendered' => 100.00,
+        'change_amount' => 0.00,
+        'status' => 'completed',
+    ]);
+
+    $this->assertDatabaseHas('transaction_details', [
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'unit_price' => 50.00,
+        'subtotal' => 100.00,
+    ]);
 });
 
-test('users are redirected to their respective role dashboards on login', function () {
-    $admin = User::factory()->admin()->create();
+it('blocks cashless transaction if rfid card is marked as lost_card', function () {
     $cashier = User::factory()->cashier()->create();
-    $parent = User::factory()->parent()->create();
-
-    $adminResponse = $this->post('/login', [
-        'email' => $admin->email,
-        'password' => 'password',
+    $student = StudentAccount::factory()->lostCard()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 200.00,
     ]);
-    $adminResponse->assertRedirect(route('admin.products.index', absolute: false));
-    $this->post('/logout');
-
-    $cashierResponse = $this->post('/login', [
-        'email' => $cashier->username,
-        'password' => 'password',
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
     ]);
-    $cashierResponse->assertRedirect(route('pos.index', absolute: false));
-    $this->post('/logout');
 
-    $parentResponse = $this->post('/login', [
-        'email' => $parent->email,
-        'password' => 'password',
-    ]);
-    $parentResponse->assertRedirect(route('parent.dashboard', absolute: false));
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 50.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('500.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(0);
 });
 
-test('inactive users cannot authenticate', function () {
-    $inactiveUser = User::factory()->inactive()->create();
-
-    $response = $this->post('/login', [
-        'email' => $inactiveUser->email,
-        'password' => 'password',
-    ]);
-
-    $this->assertGuest();
-    $response->assertSessionHasErrors('email');
-});
-
-test('unauthenticated guests are redirected to login for protected routes', function () {
-    $this->get('/admin/products')->assertRedirect('/login');
-    $this->get('/pos')->assertRedirect('/login');
-    $this->get('/parent/dashboard')->assertRedirect('/login');
-    $this->get('/')->assertRedirect('/login');
-});
-
-test('cashier can access pos but cannot access admin or parent portals', function () {
+it('blocks cashless transaction if balance is insufficient', function () {
     $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 30.00,
+        'daily_spending_limit' => 200.00,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
+    ]);
 
-    $this->actingAs($cashier)->get('/pos')->assertOk();
-    $this->actingAs($cashier)->get('/admin/products')->assertForbidden();
-    $this->actingAs($cashier)->get('/parent/dashboard')->assertForbidden();
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 50.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('30.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(0);
 });
 
-test('parent can access parent dashboard but cannot access pos or admin panel', function () {
+it('blocks cashless transaction if daily spending limit is exceeded', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 100.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+
+    // Create prior transaction of 80.00 today
+    Transaction::factory()->create([
+        'cashier_id' => $cashier->id,
+        'student_account_id' => $student->id,
+        'total_amount' => 80.00,
+        'payment_method' => 'cashless',
+        'status' => 'completed',
+        'created_at' => now(),
+    ]);
+
+    $product = Product::factory()->create([
+        'price' => 30.00,
+        'stock_quantity' => 10,
+    ]);
+
+    // 80.00 + 30.00 = 110.00, which exceeds 100.00 daily limit
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 30.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 30.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('500.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(1);
+});
+
+it('decrements product stock and generates an inventory log on successful sale', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 300.00,
+        'daily_spending_limit' => 300.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 20.00,
+        'stock_quantity' => 25,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 60.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 3,
+                'unit_price' => 20.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201);
+
+    expect($product->fresh()->stock_quantity)->toBe(22);
+
+    $this->assertDatabaseHas('inventory_logs', [
+        'product_id' => $product->id,
+        'user_id' => $cashier->id,
+        'action' => 'sale',
+        'quantity_changed' => 3,
+        'previous_stock' => 25,
+        'new_stock' => 22,
+    ]);
+});
+
+it('rolls back the entire transaction if a product is out of stock', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 500.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $productA = Product::factory()->create([
+        'price' => 20.00,
+        'stock_quantity' => 10,
+    ]);
+    $productB = Product::factory()->create([
+        'price' => 30.00,
+        'stock_quantity' => 2,
+    ]);
+
+    // Request 2 of Product A and 5 of Product B (Product B has only 2 in stock!)
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 190.00,
+        'items' => [
+            [
+                'product_id' => $productA->id,
+                'quantity' => 2,
+                'unit_price' => 20.00,
+            ],
+            [
+                'product_id' => $productB->id,
+                'quantity' => 5,
+                'unit_price' => 30.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(422);
+
+    // Verify atomic rollback across all affected entities
+    expect($productA->fresh()->stock_quantity)->toBe(10)
+        ->and($productB->fresh()->stock_quantity)->toBe(2)
+        ->and($student->fresh()->current_balance)->toBe('500.00')
+        ->and(Transaction::count())->toBe(0)
+        ->and(TransactionDetail::count())->toBe(0)
+        ->and(InventoryLog::count())->toBe(0);
+});
+
+it('processes a valid cash transaction and computes change', function () {
+    $cashier = User::factory()->cashier()->create();
+    $product = Product::factory()->create([
+        'price' => 45.00,
+        'stock_quantity' => 15,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'unit_price' => 45.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('receipt.total_amount', 90)
+        ->assertJsonPath('receipt.amount_tendered', 100)
+        ->assertJsonPath('receipt.change_amount', 10);
+
+    expect($product->fresh()->stock_quantity)->toBe(13);
+
+    $this->assertDatabaseHas('transactions', [
+        'cashier_id' => $cashier->id,
+        'student_account_id' => null,
+        'total_amount' => 90.00,
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'change_amount' => 10.00,
+        'status' => 'completed',
+    ]);
+});
+
+it('blocks unauthorized access for users without cashier or admin role', function () {
     $parent = User::factory()->parent()->create();
+    $product = Product::factory()->create();
 
-    $this->actingAs($parent)->get('/parent/dashboard')->assertOk();
-    $this->actingAs($parent)->get('/pos')->assertForbidden();
-    $this->actingAs($parent)->get('/admin/products')->assertForbidden();
-});
+    $payload = [
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => (float) $product->price,
+            ],
+        ],
+    ];
 
-test('admin can access admin panel, pos portal, and parent dashboard', function () {
-    $admin = User::factory()->admin()->create();
+    $response = $this->actingAs($parent)->postJson(route('pos.checkout'), $payload);
 
-    $this->actingAs($admin)->get('/admin/products')->assertOk();
-    $this->actingAs($admin)->get('/pos')->assertOk();
-    $this->actingAs($admin)->get('/parent/dashboard')->assertOk();
-});
-
-test('authenticated active user who becomes inactive is blocked by middleware', function () {
-    $user = User::factory()->cashier()->create();
-
-    $this->actingAs($user)->get('/pos')->assertOk();
-
-    // Deactivate user
-    $user->update(['status' => 'inactive']);
-
-    $response = $this->actingAs($user)->get('/pos');
-    $response->assertRedirect('/login');
-    $this->assertGuest();
+    $response->assertStatus(403);
 });
 </file>
 
@@ -4423,70 +4796,6 @@ Use Wayfinder with the `<Form>` component:
 - Not using type-safe parameter objects for route model binding
 </file>
 
-<file path="app/Http/Controllers/Auth/AuthenticatedSessionController.php">
-<?php
-
-namespace App\Http\Controllers\Auth;
-
-use App\Http\Controllers\Controller;
-use App\Http\Requests\Auth\LoginRequest;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
-use Inertia\Response;
-
-class AuthenticatedSessionController extends Controller
-{
-    /**
-     * Display the login view.
-     */
-    public function create(): Response
-    {
-        return Inertia::render('Auth/Login', [
-            'canResetPassword' => Route::has('password.request'),
-            'status' => session('status'),
-        ]);
-    }
-
-    /**
-     * Handle an incoming authentication request.
-     */
-    public function store(LoginRequest $request): RedirectResponse
-    {
-        $request->authenticate();
-
-        $request->session()->regenerate();
-
-        $user = $request->user();
-
-        $defaultRoute = match ($user->role) {
-            'admin' => route('admin.products.index', absolute: false),
-            'cashier' => route('pos.index', absolute: false),
-            'parent' => route('parent.dashboard', absolute: false),
-            default => route('dashboard', absolute: false),
-        };
-
-        return redirect()->intended($defaultRoute);
-    }
-
-    /**
-     * Destroy an authenticated session.
-     */
-    public function destroy(Request $request): RedirectResponse
-    {
-        Auth::guard('web')->logout();
-
-        $request->session()->invalidate();
-
-        $request->session()->regenerateToken();
-
-        return redirect('/');
-    }
-}
-</file>
-
 <file path="app/Http/Controllers/Auth/ConfirmablePasswordController.php">
 <?php
 
@@ -4741,85 +5050,6 @@ class PasswordResetLinkController extends Controller
 }
 </file>
 
-<file path="app/Http/Controllers/Auth/RegisteredUserController.php">
-<?php
-
-namespace App\Http\Controllers\Auth;
-
-use App\Http\Controllers\Controller;
-use App\Models\User;
-use Illuminate\Auth\Events\Registered;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
-use Illuminate\Validation\Rules;
-use Illuminate\Validation\ValidationException;
-use Inertia\Inertia;
-use Inertia\Response;
-
-class RegisteredUserController extends Controller
-{
-    /**
-     * Display the registration view.
-     */
-    public function create(): Response
-    {
-        return Inertia::render('Auth/Register');
-    }
-
-    /**
-     * Handle an incoming registration request.
-     *
-     * @throws ValidationException
-     */
-    public function store(Request $request): RedirectResponse
-    {
-        $request->validate([
-            'name' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'full_name' => ['sometimes', 'nullable', 'string', 'max:100'],
-            'username' => ['sometimes', 'nullable', 'string', 'max:50', 'unique:'.User::class],
-            'email' => ['required', 'string', 'lowercase', 'email', 'max:100', 'unique:'.User::class],
-            'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
-        ]);
-
-        $fullName = $request->full_name ?? $request->name ?? 'User';
-
-        $username = $request->username;
-        if (! $username) {
-            $baseUsername = Str::slug(explode('@', (string) $request->email)[0] ?? $fullName, '_');
-            if (empty($baseUsername)) {
-                $baseUsername = 'user';
-            }
-            $username = $baseUsername;
-            $counter = 1;
-            while (User::where('username', $username)->exists()) {
-                $username = $baseUsername.$counter;
-                $counter++;
-            }
-        }
-
-        $user = User::create([
-            'username' => $username,
-            'full_name' => $fullName,
-            'email' => $request->email,
-            'phone' => $request->phone,
-            'role' => 'parent',
-            'status' => 'active',
-            'password' => Hash::make($request->password),
-        ]);
-
-        event(new Registered($user));
-
-        Auth::login($user);
-
-        return redirect()->intended(route('parent.dashboard', absolute: false));
-    }
-}
-</file>
-
 <file path="app/Http/Controllers/Auth/VerifyEmailController.php">
 <?php
 
@@ -4861,255 +5091,37 @@ abstract class Controller
 }
 </file>
 
-<file path="app/Http/Controllers/ProfileController.php">
-<?php
-
-namespace App\Http\Controllers;
-
-use App\Http\Requests\ProfileUpdateRequest;
-use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Redirect;
-use Illuminate\Support\Facades\Schema;
-use Inertia\Inertia;
-use Inertia\Response;
-
-class ProfileController extends Controller
-{
-    /**
-     * Display the user's profile form.
-     */
-    public function edit(Request $request): Response
-    {
-        return Inertia::render('Profile/Edit', [
-            'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
-            'status' => session('status'),
-        ]);
-    }
-
-    /**
-     * Update the user's profile information.
-     */
-    public function update(ProfileUpdateRequest $request): RedirectResponse
-    {
-        $data = $request->validated();
-        if (isset($data['name']) && ! isset($data['full_name'])) {
-            $data['full_name'] = $data['name'];
-        }
-
-        $request->user()->fill($data);
-
-        if ($request->user()->isDirty('email') && Schema::hasColumn('users', 'email_verified_at')) {
-            $request->user()->email_verified_at = null;
-        }
-
-        $request->user()->save();
-
-        return Redirect::route('profile.edit');
-    }
-
-    /**
-     * Delete the user's account.
-     */
-    public function destroy(Request $request): RedirectResponse
-    {
-        $request->validate([
-            'password' => ['required', 'current_password'],
-        ]);
-
-        $user = $request->user();
-
-        Auth::logout();
-
-        $user->delete();
-
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
-        return Redirect::to('/');
-    }
-}
-</file>
-
-<file path="app/Http/Middleware/HandleInertiaRequests.php">
+<file path="app/Http/Middleware/EnsureUserIsActive.php">
 <?php
 
 namespace App\Http\Middleware;
 
+use Closure;
 use Illuminate\Http\Request;
-use Inertia\Middleware;
-
-class HandleInertiaRequests extends Middleware
-{
-    /**
-     * The root template that is loaded on the first page visit.
-     *
-     * @var string
-     */
-    protected $rootView = 'app';
-
-    /**
-     * Determine the current asset version.
-     */
-    public function version(Request $request): ?string
-    {
-        return parent::version($request);
-    }
-
-    /**
-     * Define the props that are shared by default.
-     *
-     * @return array<string, mixed>
-     */
-    public function share(Request $request): array
-    {
-        $user = $request->user();
-
-        return [
-            ...parent::share($request),
-            'auth' => [
-                'user' => $user ? [
-                    'id' => $user->id,
-                    'username' => $user->username,
-                    'full_name' => $user->full_name,
-                    'name' => $user->full_name,
-                    'email' => $user->email,
-                    'phone' => $user->phone,
-                    'role' => $user->role,
-                    'status' => $user->status,
-                    'roles' => $user->roles->pluck('name')->toArray(),
-                    'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
-                ] : null,
-            ],
-        ];
-    }
-}
-</file>
-
-<file path="app/Http/Requests/Auth/LoginRequest.php">
-<?php
-
-namespace App\Http\Requests\Auth;
-
-use App\Models\User;
-use Illuminate\Auth\Events\Lockout;
-use Illuminate\Contracts\Validation\ValidationRule;
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response;
 
-class LoginRequest extends FormRequest
+class EnsureUserIsActive
 {
     /**
-     * Determine if the user is authorized to make this request.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /**
-     * Get the validation rules that apply to the request.
+     * Handle an incoming request.
      *
-     * @return array<string, ValidationRule|array<mixed>|string>
+     * @param  Closure(Request): (Response)  $next
      */
-    public function rules(): array
+    public function handle(Request $request, Closure $next): Response
     {
-        return [
-            'login' => ['sometimes', 'nullable', 'string'],
-            'email' => ['sometimes', 'nullable', 'string'],
-            'username' => ['sometimes', 'nullable', 'string'],
-            'password' => ['required', 'string'],
-        ];
-    }
+        if (Auth::check() && ! Auth::user()->isActive()) {
+            Auth::guard('web')->logout();
 
-    /**
-     * Configure the validator instance.
-     */
-    public function withValidator($validator): void
-    {
-        $validator->after(function ($validator) {
-            $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
-            if (empty($identifier)) {
-                $validator->errors()->add('email', __('The email or username field is required.'));
-            }
-        });
-    }
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
 
-    /**
-     * Attempt to authenticate the request's credentials.
-     *
-     * @throws ValidationException
-     */
-    public function authenticate(): void
-    {
-        $this->ensureIsNotRateLimited();
-
-        $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
-        $isEmail = filter_var($identifier, FILTER_VALIDATE_EMAIL);
-        $field = $isEmail ? 'email' : 'username';
-
-        $user = User::where($field, $identifier)->first();
-
-        if ($user && ! $user->isActive()) {
-            RateLimiter::hit($this->throttleKey());
-
-            throw ValidationException::withMessages([
+            return redirect()->route('login')->withErrors([
                 'email' => __('Your account has been deactivated. Please contact the administrator.'),
             ]);
         }
 
-        $credentials = [
-            $field => $identifier,
-            'password' => $this->string('password'),
-        ];
-
-        if (! Auth::attempt($credentials, $this->boolean('remember'))) {
-            RateLimiter::hit($this->throttleKey());
-
-            throw ValidationException::withMessages([
-                'email' => trans('auth.failed'),
-            ]);
-        }
-
-        RateLimiter::clear($this->throttleKey());
-    }
-
-    /**
-     * Ensure the login request is not rate limited.
-     *
-     * @throws ValidationException
-     */
-    public function ensureIsNotRateLimited(): void
-    {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
-            return;
-        }
-
-        event(new Lockout($this));
-
-        $seconds = RateLimiter::availableIn($this->throttleKey());
-
-        throw ValidationException::withMessages([
-            'email' => trans('auth.throttle', [
-                'seconds' => $seconds,
-                'minutes' => ceil($seconds / 60),
-            ]),
-        ]);
-    }
-
-    /**
-     * Get the rate limiting throttle key for the request.
-     */
-    public function throttleKey(): string
-    {
-        $identifier = (string) ($this->input('login') ?? $this->input('email') ?? $this->input('username'));
-
-        return Str::transliterate(Str::lower($identifier).'|'.$this->ip());
+        return $next($request);
     }
 }
 </file>
@@ -7327,6 +7339,177 @@ return new class extends Migration
 };
 </file>
 
+<file path="database/seeders/RolesAndPermissionsSeeder.php">
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\StudentAccount;
+use App\Models\User;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
+
+class RolesAndPermissionsSeeder extends Seeder
+{
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        // Reset cached roles and permissions
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // 1. Define Permissions
+        $permissions = [
+            // Admin permissions
+            'access-admin',
+            'manage-products',
+            'manage-users',
+            'manage-inventory',
+            'view-audit-logs',
+            'view-reports',
+
+            // POS / Cashier permissions
+            'access-pos',
+            'process-sales',
+            'topup-balance',
+            'view-products',
+
+            // Parent Portal permissions
+            'access-parent-portal',
+            'view-student-accounts',
+            'manage-student-limits',
+
+            // General / Student / Faculty permissions
+            'access-portal',
+            'view-own-balance',
+        ];
+
+        foreach ($permissions as $permission) {
+            Permission::findOrCreate($permission, 'web');
+        }
+
+        // 2. Define Roles and Assign Permissions
+        $adminRole = Role::findOrCreate('admin', 'web');
+        $adminRole->syncPermissions(Permission::all());
+
+        $cashierRole = Role::findOrCreate('cashier', 'web');
+        $cashierRole->syncPermissions([
+            'access-pos',
+            'process-sales',
+            'topup-balance',
+            'view-products',
+        ]);
+
+        $parentRole = Role::findOrCreate('parent', 'web');
+        $parentRole->syncPermissions([
+            'access-parent-portal',
+            'view-student-accounts',
+            'manage-student-limits',
+            'topup-balance',
+        ]);
+
+        $facultyRole = Role::findOrCreate('faculty', 'web');
+        $facultyRole->syncPermissions([
+            'access-portal',
+            'view-own-balance',
+        ]);
+
+        $studentRole = Role::findOrCreate('student', 'web');
+        $studentRole->syncPermissions([
+            'access-portal',
+            'view-own-balance',
+        ]);
+
+        // 3. Seed Default System Users
+        $admin = User::firstOrCreate(
+            ['username' => 'admin'],
+            [
+                'full_name' => 'System Administrator',
+                'email' => 'admin@stct.edu.ph',
+                'phone' => '09123456780',
+                'role' => 'admin',
+                'status' => 'active',
+                'password' => Hash::make('password'),
+            ]
+        );
+        $admin->syncRoles([$adminRole]);
+
+        $cashier = User::firstOrCreate(
+            ['username' => 'cashier'],
+            [
+                'full_name' => 'Canteen Cashier',
+                'email' => 'cashier@stct.edu.ph',
+                'phone' => '09123456781',
+                'role' => 'cashier',
+                'status' => 'active',
+                'password' => Hash::make('password'),
+            ]
+        );
+        $cashier->syncRoles([$cashierRole]);
+
+        $parent = User::firstOrCreate(
+            ['username' => 'parent'],
+            [
+                'full_name' => 'Parent Guardian',
+                'email' => 'parent@stct.edu.ph',
+                'phone' => '09123456782',
+                'role' => 'parent',
+                'status' => 'active',
+                'password' => Hash::make('password'),
+            ]
+        );
+        $parent->syncRoles([$parentRole]);
+
+        $faculty = User::firstOrCreate(
+            ['username' => 'faculty'],
+            [
+                'full_name' => 'Faculty Member',
+                'email' => 'faculty@stct.edu.ph',
+                'phone' => '09123456783',
+                'role' => 'faculty',
+                'status' => 'active',
+                'password' => Hash::make('password'),
+            ]
+        );
+        $faculty->syncRoles([$facultyRole]);
+
+        $student = User::firstOrCreate(
+            ['username' => 'student'],
+            [
+                'full_name' => 'Student User',
+                'email' => 'student@stct.edu.ph',
+                'phone' => '09123456784',
+                'role' => 'student',
+                'status' => 'active',
+                'password' => Hash::make('password'),
+            ]
+        );
+        $student->syncRoles([$studentRole]);
+
+        // 4. Seed a linked student account for the parent
+        StudentAccount::firstOrCreate(
+            ['student_id_number' => '2026-0001'],
+            [
+                'rfid_uid' => 'E28011700000020',
+                'first_name' => 'Theresian',
+                'last_name' => 'Student',
+                'grade_level' => 'Grade 10',
+                'section' => 'St. Theresa',
+                'parent_id' => $parent->id,
+                'current_balance' => 350.00,
+                'daily_spending_limit' => 200.00,
+                'is_spending_limited' => true,
+                'status' => 'active',
+            ]
+        );
+    }
+}
+</file>
+
 <file path="database/.gitignore">
 *.sqlite*
 </file>
@@ -7507,123 +7690,6 @@ $app->handleRequest(Request::capture());
 <file path="public/robots.txt">
 User-agent: *
 Disallow:
-</file>
-
-<file path="resources/js/actions/App/Http/Controllers/Auth/AuthenticatedSessionController.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../../wayfinder'
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-
-create.definition = {
-    methods: ["get","head"],
-    url: '/login',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-create.url = (options?: RouteQueryOptions) => {
-    return create.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: create.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
- * @route '/login'
- */
-export const store = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: store.url(options),
-    method: 'post',
-})
-
-store.definition = {
-    methods: ["post"],
-    url: '/login',
-} satisfies RouteDefinition<["post"]>
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
- * @route '/login'
- */
-store.url = (options?: RouteQueryOptions) => {
-    return store.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
- * @route '/login'
- */
-store.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: store.url(options),
-    method: 'post',
-})
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
- */
-export const destroy = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: destroy.url(options),
-    method: 'post',
-})
-
-destroy.definition = {
-    methods: ["post"],
-    url: '/logout',
-} satisfies RouteDefinition<["post"]>
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
- */
-destroy.url = (options?: RouteQueryOptions) => {
-    return destroy.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
- */
-destroy.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: destroy.url(options),
-    method: 'post',
-})
-const AuthenticatedSessionController = { create, store, destroy }
-
-export default AuthenticatedSessionController
 </file>
 
 <file path="resources/js/actions/App/Http/Controllers/Auth/ConfirmablePasswordController.ts">
@@ -8046,89 +8112,6 @@ const PasswordResetLinkController = { create, store }
 export default PasswordResetLinkController
 </file>
 
-<file path="resources/js/actions/App/Http/Controllers/Auth/RegisteredUserController.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../../wayfinder'
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::create
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
- */
-export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-
-create.definition = {
-    methods: ["get","head"],
-    url: '/register',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::create
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
- */
-create.url = (options?: RouteQueryOptions) => {
-    return create.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::create
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
- */
-create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::create
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
- */
-create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: create.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::store
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
- * @route '/register'
- */
-export const store = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: store.url(options),
-    method: 'post',
-})
-
-store.definition = {
-    methods: ["post"],
-    url: '/register',
-} satisfies RouteDefinition<["post"]>
-
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::store
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
- * @route '/register'
- */
-store.url = (options?: RouteQueryOptions) => {
-    return store.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::store
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
- * @route '/register'
- */
-store.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: store.url(options),
-    method: 'post',
-})
-const RegisteredUserController = { create, store }
-
-export default RegisteredUserController
-</file>
-
 <file path="resources/js/actions/App/Http/Controllers/Auth/VerifyEmailController.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition, applyUrlDefaults } from './../../../../../wayfinder'
 /**
@@ -8202,123 +8185,6 @@ Auth: Object.assign(Auth, Auth),
 }
 
 export default Controllers
-</file>
-
-<file path="resources/js/actions/App/Http/Controllers/ProfileController.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/profile',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-update.definition = {
-    methods: ["patch"],
-    url: '/profile',
-} satisfies RouteDefinition<["patch"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-update.url = (options?: RouteQueryOptions) => {
-    return update.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-
-destroy.definition = {
-    methods: ["delete"],
-    url: '/profile',
-} satisfies RouteDefinition<["delete"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-destroy.url = (options?: RouteQueryOptions) => {
-    return destroy.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-const ProfileController = { edit, update, destroy }
-
-export default ProfileController
 </file>
 
 <file path="resources/js/actions/App/Http/index.ts">
@@ -12569,180 +12435,6 @@ export default function Dashboard() {
 }
 </file>
 
-<file path="resources/js/routes/admin/audit-logs/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
-/**
- * @see routes/web.php:63
- * @route '/admin/audit-logs'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/admin/audit-logs',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:63
- * @route '/admin/audit-logs'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:63
- * @route '/admin/audit-logs'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:63
- * @route '/admin/audit-logs'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-const auditLogs = {
-    index: Object.assign(index, index),
-}
-
-export default auditLogs
-</file>
-
-<file path="resources/js/routes/admin/products/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
-/**
- * @see routes/web.php:51
- * @route '/admin/products'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/admin/products',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:51
- * @route '/admin/products'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:51
- * @route '/admin/products'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:51
- * @route '/admin/products'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-
-/**
- * @see routes/web.php:55
- * @route '/admin/products/create'
- */
-export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-
-create.definition = {
-    methods: ["get","head"],
-    url: '/admin/products/create',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:55
- * @route '/admin/products/create'
- */
-create.url = (options?: RouteQueryOptions) => {
-    return create.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:55
- * @route '/admin/products/create'
- */
-create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:55
- * @route '/admin/products/create'
- */
-create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: create.url(options),
-    method: 'head',
-})
-
-/**
- * @see routes/web.php:59
- * @route '/admin/products/edit'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/admin/products/edit',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:59
- * @route '/admin/products/edit'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:59
- * @route '/admin/products/edit'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:59
- * @route '/admin/products/edit'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-const products = {
-    index: Object.assign(index, index),
-create: Object.assign(create, create),
-edit: Object.assign(edit, edit),
-}
-
-export default products
-</file>
-
 <file path="resources/js/routes/admin/index.ts">
 import products from './products'
 import auditLogs from './audit-logs'
@@ -12791,53 +12483,6 @@ const boost = {
 }
 
 export default boost
-</file>
-
-<file path="resources/js/routes/parent/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
- * @see routes/web.php:40
- * @route '/parent/dashboard'
- */
-export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: dashboard.url(options),
-    method: 'get',
-})
-
-dashboard.definition = {
-    methods: ["get","head"],
-    url: '/parent/dashboard',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:40
- * @route '/parent/dashboard'
- */
-dashboard.url = (options?: RouteQueryOptions) => {
-    return dashboard.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:40
- * @route '/parent/dashboard'
- */
-dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: dashboard.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:40
- * @route '/parent/dashboard'
- */
-dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: dashboard.url(options),
-    method: 'head',
-})
-const parent = {
-    dashboard: Object.assign(dashboard, dashboard),
-}
-
-export default parent
 </file>
 
 <file path="resources/js/routes/password/index.ts">
@@ -13101,174 +12746,6 @@ update: Object.assign(update, update),
 }
 
 export default password
-</file>
-
-<file path="resources/js/routes/pos/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
- * @see routes/web.php:33
- * @route '/pos'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/pos',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:33
- * @route '/pos'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:33
- * @route '/pos'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:33
- * @route '/pos'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-const pos = {
-    index: Object.assign(index, index),
-}
-
-export default pos
-</file>
-
-<file path="resources/js/routes/profile/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/profile',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
- * @route '/profile'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-update.definition = {
-    methods: ["patch"],
-    url: '/profile',
-} satisfies RouteDefinition<["patch"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-update.url = (options?: RouteQueryOptions) => {
-    return update.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
- * @route '/profile'
- */
-update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-
-destroy.definition = {
-    methods: ["delete"],
-    url: '/profile',
-} satisfies RouteDefinition<["delete"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-destroy.url = (options?: RouteQueryOptions) => {
-    return destroy.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
- * @route '/profile'
- */
-destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-const profile = {
-    edit: Object.assign(edit, edit),
-update: Object.assign(update, update),
-destroy: Object.assign(destroy, destroy),
-}
-
-export default profile
 </file>
 
 <file path="resources/js/routes/sanctum/index.ts">
@@ -13592,30 +13069,6 @@ send: Object.assign(send, send),
 }
 
 export default verification
-</file>
-
-<file path="resources/js/types/index.d.ts">
-export interface User {
-    id: number;
-    username: string;
-    full_name: string;
-    name?: string;
-    email?: string;
-    phone?: string;
-    role: 'admin' | 'cashier' | 'parent' | 'faculty' | 'student';
-    status: 'active' | 'inactive';
-    roles?: string[];
-    permissions?: string[];
-    email_verified_at?: string;
-}
-
-export type PageProps<
-    T extends Record<string, unknown> = Record<string, unknown>,
-> = T & {
-    auth: {
-        user: User;
-    };
-};
 </file>
 
 <file path="resources/js/types/vite-env.d.ts">
@@ -13989,118 +13442,6 @@ services.json
 !.gitignore
 </file>
 
-<file path="tests/Feature/Auth/AuthenticationTest.php">
-<?php
-
-use App\Models\User;
-
-test('login screen can be rendered', function () {
-    $response = $this->get('/login');
-
-    $response->assertStatus(200);
-});
-
-test('users can authenticate using the login screen with email', function () {
-    $user = User::factory()->create();
-
-    $response = $this->post('/login', [
-        'email' => $user->email,
-        'password' => 'password',
-    ]);
-
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('admin.products.index', absolute: false));
-});
-
-test('users can authenticate using the login screen with username', function () {
-    $user = User::factory()->create();
-
-    $response = $this->post('/login', [
-        'email' => $user->username,
-        'password' => 'password',
-    ]);
-
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('admin.products.index', absolute: false));
-});
-
-test('users can not authenticate with invalid password', function () {
-    $user = User::factory()->create();
-
-    $this->post('/login', [
-        'email' => $user->email,
-        'password' => 'wrong-password',
-    ]);
-
-    $this->assertGuest();
-});
-
-test('users can logout', function () {
-    $user = User::factory()->create();
-
-    $response = $this->actingAs($user)->post('/logout');
-
-    $this->assertGuest();
-    $response->assertRedirect('/');
-});
-</file>
-
-<file path="tests/Feature/Auth/EmailVerificationTest.php">
-<?php
-
-use App\Models\User;
-use Illuminate\Auth\Events\Verified;
-use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\URL;
-
-beforeEach(function () {
-    if (! Schema::hasColumn('users', 'email_verified_at')) {
-        test()->markTestSkipped('Email verification is not enabled in this application.');
-    }
-});
-
-test('email verification screen can be rendered', function () {
-    $user = User::factory()->unverified()->create();
-
-    $response = $this->actingAs($user)->get('/verify-email');
-
-    $response->assertStatus(200);
-});
-
-test('email can be verified', function () {
-    $user = User::factory()->unverified()->create();
-
-    Event::fake();
-
-    $verificationUrl = URL::temporarySignedRoute(
-        'verification.verify',
-        now()->addMinutes(60),
-        ['id' => $user->id, 'hash' => sha1($user->email)]
-    );
-
-    $response = $this->actingAs($user)->get($verificationUrl);
-
-    Event::assertDispatched(Verified::class);
-    expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
-    $response->assertRedirect(route('dashboard', absolute: false).'?verified=1');
-});
-
-test('email is not verified with invalid hash', function () {
-    $user = User::factory()->unverified()->create();
-
-    $verificationUrl = URL::temporarySignedRoute(
-        'verification.verify',
-        now()->addMinutes(60),
-        ['id' => $user->id, 'hash' => sha1('wrong-email')]
-    );
-
-    $this->actingAs($user)->get($verificationUrl);
-
-    expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
-});
-</file>
-
 <file path="tests/Feature/Auth/PasswordConfirmationTest.php">
 <?php
 
@@ -14242,231 +13583,114 @@ test('correct password must be provided to update password', function () {
 });
 </file>
 
-<file path="tests/Feature/Auth/RegistrationTest.php">
+<file path="tests/Feature/Auth/RoleBasedAccessControlTest.php">
 <?php
 
-test('registration screen can be rendered', function () {
-    $response = $this->get('/register');
+use App\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
 
-    $response->assertStatus(200);
+beforeEach(function () {
+    $this->seed(RolesAndPermissionsSeeder::class);
 });
 
-test('new users can register', function () {
-    $response = $this->post('/register', [
-        'name' => 'Test User',
-        'email' => 'test@example.com',
+test('roles and permissions are automatically assigned to users matching their role enum', function () {
+    $admin = User::factory()->admin()->create();
+    $cashier = User::factory()->cashier()->create();
+    $parent = User::factory()->parent()->create();
+    $faculty = User::factory()->faculty()->create();
+    $student = User::factory()->student()->create();
+
+    expect($admin->hasRole('admin'))->toBeTrue()
+        ->and($admin->can('access-admin'))->toBeTrue()
+        ->and($cashier->hasRole('cashier'))->toBeTrue()
+        ->and($cashier->can('access-pos'))->toBeTrue()
+        ->and($cashier->can('access-admin'))->toBeFalse()
+        ->and($parent->hasRole('parent'))->toBeTrue()
+        ->and($parent->can('access-parent-portal'))->toBeTrue()
+        ->and($faculty->hasRole('faculty'))->toBeTrue()
+        ->and($student->hasRole('student'))->toBeTrue();
+});
+
+test('users are redirected to their respective role dashboards on login', function () {
+    $admin = User::factory()->admin()->create();
+    $cashier = User::factory()->cashier()->create();
+    $parent = User::factory()->parent()->create();
+
+    $adminResponse = $this->post('/login', [
+        'email' => $admin->email,
         'password' => 'password',
-        'password_confirmation' => 'password',
     ]);
+    $adminResponse->assertRedirect(route('admin.products.index', absolute: false));
+    $this->post('/logout');
 
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('parent.dashboard', absolute: false));
-});
-</file>
-
-<file path="tests/Feature/ExampleTest.php">
-<?php
-
-it('returns a successful response', function () {
-    $response = $this->get('/');
-
-    $response->assertRedirect('/login');
-});
-</file>
-
-<file path="tests/Feature/ModelRelationshipsTest.php">
-<?php
-
-use App\Models\Category;
-use App\Models\InventoryLog;
-use App\Models\Product;
-use App\Models\StudentAccount;
-use App\Models\Transaction;
-use App\Models\TransactionDetail;
-use App\Models\User;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use OwenIt\Auditing\Auditable;
-use Spatie\Permission\Traits\HasRoles;
-
-test('category has many products and supports soft deletes', function () {
-    $category = Category::factory()->create();
-    $product = Product::factory()->create([
-        'category_id' => $category->id,
+    $cashierResponse = $this->post('/login', [
+        'email' => $cashier->username,
+        'password' => 'password',
     ]);
+    $cashierResponse->assertRedirect(route('pos.index', absolute: false));
+    $this->post('/logout');
 
-    expect($category->products)->toHaveCount(1)
-        ->and($category->products->first()->id)->toBe($product->id)
-        ->and($product->category->id)->toBe($category->id);
-
-    $category->delete();
-    expect(Category::find($category->id))->toBeNull()
-        ->and(Category::withTrashed()->find($category->id))->not->toBeNull();
-});
-
-test('transaction detail belongs to transaction and product with disabled timestamps', function () {
-    $transaction = Transaction::factory()->create();
-    $product = Product::factory()->create();
-
-    $detail = TransactionDetail::factory()->create([
-        'transaction_id' => $transaction->id,
-        'product_id' => $product->id,
-        'quantity' => 3,
-        'unit_price' => 15.50,
-        'subtotal' => 46.50,
+    $parentResponse = $this->post('/login', [
+        'email' => $parent->email,
+        'password' => 'password',
     ]);
-
-    expect($detail->timestamps)->toBeFalse()
-        ->and($detail->transaction->id)->toBe($transaction->id)
-        ->and($detail->product->id)->toBe($product->id)
-        ->and($transaction->details)->toHaveCount(1)
-        ->and($transaction->details->first()->id)->toBe($detail->id)
-        ->and($product->transactionDetails)->toHaveCount(1)
-        ->and($product->transactionDetails->first()->id)->toBe($detail->id);
+    $parentResponse->assertRedirect(route('parent.dashboard', absolute: false));
 });
 
-test('inventory log belongs to product and user and connects to inverse relations', function () {
-    $user = User::factory()->create();
-    $product = Product::factory()->create();
+test('inactive users cannot authenticate', function () {
+    $inactiveUser = User::factory()->inactive()->create();
 
-    $log = InventoryLog::factory()->create([
-        'product_id' => $product->id,
-        'user_id' => $user->id,
-        'action' => 'restock',
-        'quantity_changed' => 10,
-        'previous_stock' => 5,
-        'new_stock' => 15,
+    $response = $this->post('/login', [
+        'email' => $inactiveUser->email,
+        'password' => 'password',
     ]);
-
-    expect($log->product->id)->toBe($product->id)
-        ->and($log->user->id)->toBe($user->id)
-        ->and($product->inventoryLogs)->toHaveCount(1)
-        ->and($product->inventoryLogs->first()->id)->toBe($log->id)
-        ->and($user->inventoryLogs)->toHaveCount(1)
-        ->and($user->inventoryLogs->first()->id)->toBe($log->id);
-});
-
-test('user model implements auditable, uses expected traits, has fillables, and links to student accounts', function () {
-    $parent = User::factory()->create([
-        'role' => 'parent',
-    ]);
-
-    expect($parent)->toBeInstanceOf(OwenIt\Auditing\Contracts\Auditable::class)
-        ->and(in_array(SoftDeletes::class, class_uses_recursive(User::class)))->toBeTrue()
-        ->and(in_array(HasRoles::class, class_uses_recursive(User::class)))->toBeTrue()
-        ->and(in_array(Auditable::class, class_uses_recursive(User::class)))->toBeTrue()
-        ->and($parent->getFillable())->toEqualCanonicalizing([
-            'username', 'password', 'full_name', 'email', 'phone', 'role', 'status',
-        ]);
-
-    $student = StudentAccount::create([
-        'student_id_number' => 'STU-12345',
-        'first_name' => 'John',
-        'last_name' => 'Doe',
-        'grade_level' => 'Grade 10',
-        'section' => 'St. Francis',
-        'parent_id' => $parent->id,
-        'current_balance' => 150.00,
-        'daily_spending_limit' => 200.00,
-        'is_spending_limited' => true,
-        'status' => 'active',
-    ]);
-
-    expect($parent->studentAccounts)->toHaveCount(1)
-        ->and($parent->studentAccounts->first()->id)->toBe($student->id)
-        ->and($student->parent->id)->toBe($parent->id);
-});
-</file>
-
-<file path="tests/Feature/ProfileTest.php">
-<?php
-
-use App\Models\User;
-use Illuminate\Support\Facades\Schema;
-
-test('profile page is displayed', function () {
-    $user = User::factory()->create();
-
-    $response = $this
-        ->actingAs($user)
-        ->get('/profile');
-
-    $response->assertOk();
-});
-
-test('profile information can be updated', function () {
-    $user = User::factory()->create();
-
-    $response = $this
-        ->actingAs($user)
-        ->patch('/profile', [
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
-
-    $response
-        ->assertSessionHasNoErrors()
-        ->assertRedirect('/profile');
-
-    $user->refresh();
-
-    $this->assertSame('Test User', $user->name);
-    $this->assertSame('test@example.com', $user->email);
-    $this->assertNull($user->email_verified_at);
-});
-
-test('email verification status is unchanged when the email address is unchanged', function () {
-    if (! Schema::hasColumn('users', 'email_verified_at')) {
-        test()->markTestSkipped('Email verification is not enabled in this application.');
-    }
-
-    $user = User::factory()->create();
-
-    $response = $this
-        ->actingAs($user)
-        ->patch('/profile', [
-            'name' => 'Test User',
-            'email' => $user->email,
-        ]);
-
-    $response
-        ->assertSessionHasNoErrors()
-        ->assertRedirect('/profile');
-
-    $this->assertNotNull($user->refresh()->email_verified_at);
-});
-
-test('user can delete their account', function () {
-    $user = User::factory()->create();
-
-    $response = $this
-        ->actingAs($user)
-        ->delete('/profile', [
-            'password' => 'password',
-        ]);
-
-    $response
-        ->assertSessionHasNoErrors()
-        ->assertRedirect('/');
 
     $this->assertGuest();
-    $this->assertTrue($user->fresh()->trashed());
+    $response->assertSessionHasErrors('email');
 });
 
-test('correct password must be provided to delete account', function () {
-    $user = User::factory()->create();
+test('unauthenticated guests are redirected to login for protected routes', function () {
+    $this->get('/admin/products')->assertRedirect('/login');
+    $this->get('/pos')->assertRedirect('/login');
+    $this->get('/parent/dashboard')->assertRedirect('/login');
+    $this->get('/')->assertRedirect('/login');
+});
 
-    $response = $this
-        ->actingAs($user)
-        ->from('/profile')
-        ->delete('/profile', [
-            'password' => 'wrong-password',
-        ]);
+test('cashier can access pos but cannot access admin or parent portals', function () {
+    $cashier = User::factory()->cashier()->create();
 
-    $response
-        ->assertSessionHasErrors('password')
-        ->assertRedirect('/profile');
+    $this->actingAs($cashier)->get('/pos')->assertOk();
+    $this->actingAs($cashier)->get('/admin/products')->assertForbidden();
+    $this->actingAs($cashier)->get('/parent/dashboard')->assertForbidden();
+});
 
-    $this->assertNotNull($user->fresh());
+test('parent can access parent dashboard but cannot access pos or admin panel', function () {
+    $parent = User::factory()->parent()->create();
+
+    $this->actingAs($parent)->get('/parent/dashboard')->assertOk();
+    $this->actingAs($parent)->get('/pos')->assertForbidden();
+    $this->actingAs($parent)->get('/admin/products')->assertForbidden();
+});
+
+test('admin can access admin panel, pos portal, and parent dashboard', function () {
+    $admin = User::factory()->admin()->create();
+
+    $this->actingAs($admin)->get('/admin/products')->assertOk();
+    $this->actingAs($admin)->get('/pos')->assertOk();
+    $this->actingAs($admin)->get('/parent/dashboard')->assertOk();
+});
+
+test('authenticated active user who becomes inactive is blocked by middleware', function () {
+    $user = User::factory()->cashier()->create();
+
+    $this->actingAs($user)->get('/pos')->assertOk();
+
+    // Deactivate user
+    $user->update(['status' => 'inactive']);
+
+    $response = $this->actingAs($user)->get('/pos');
+    $response->assertRedirect('/login');
+    $this->assertGuest();
 });
 </file>
 
@@ -14944,6 +14168,402 @@ If existing pages and components support dark mode, new pages and components mus
 - Forgetting to add dark mode variants when the project uses dark mode
 </file>
 
+<file path="app/Http/Controllers/Auth/AuthenticatedSessionController.php">
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class AuthenticatedSessionController extends Controller
+{
+    /**
+     * Display the login view.
+     */
+    public function create(): Response
+    {
+        return Inertia::render('Auth/Login', [
+            'canResetPassword' => Route::has('password.request'),
+            'status' => session('status'),
+        ]);
+    }
+
+    /**
+     * Handle an incoming authentication request.
+     */
+    public function store(LoginRequest $request): RedirectResponse
+    {
+        $request->authenticate();
+
+        $request->session()->regenerate();
+
+        $user = $request->user();
+
+        $defaultRoute = match ($user->role) {
+            'admin' => route('admin.products.index', absolute: false),
+            'cashier' => route('pos.index', absolute: false),
+            'parent' => route('parent.dashboard', absolute: false),
+            default => route('dashboard', absolute: false),
+        };
+
+        return redirect()->intended($defaultRoute);
+    }
+
+    /**
+     * Destroy an authenticated session.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        Auth::guard('web')->logout();
+
+        $request->session()->invalidate();
+
+        $request->session()->regenerateToken();
+
+        return redirect('/');
+    }
+}
+</file>
+
+<file path="app/Http/Controllers/Auth/RegisteredUserController.php">
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\User;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rules;
+use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class RegisteredUserController extends Controller
+{
+    /**
+     * Display the registration view.
+     */
+    public function create(): Response
+    {
+        return Inertia::render('Auth/Register');
+    }
+
+    /**
+     * Handle an incoming registration request.
+     *
+     * @throws ValidationException
+     */
+    public function store(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'name' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'full_name' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'username' => ['sometimes', 'nullable', 'string', 'max:50', 'unique:'.User::class],
+            'email' => ['required', 'string', 'lowercase', 'email', 'max:100', 'unique:'.User::class],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ]);
+
+        $fullName = $request->full_name ?? $request->name ?? 'User';
+
+        $username = $request->username;
+        if (! $username) {
+            $baseUsername = Str::slug(explode('@', (string) $request->email)[0] ?? $fullName, '_');
+            if (empty($baseUsername)) {
+                $baseUsername = 'user';
+            }
+            $username = $baseUsername;
+            $counter = 1;
+            while (User::where('username', $username)->exists()) {
+                $username = $baseUsername.$counter;
+                $counter++;
+            }
+        }
+
+        $user = User::create([
+            'username' => $username,
+            'full_name' => $fullName,
+            'email' => $request->email,
+            'phone' => $request->phone,
+            'role' => 'parent',
+            'status' => 'active',
+            'password' => Hash::make($request->password),
+        ]);
+
+        event(new Registered($user));
+
+        Auth::login($user);
+
+        return redirect()->intended(route('parent.dashboard', absolute: false));
+    }
+}
+</file>
+
+<file path="app/Http/Controllers/ProfileController.php">
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\ProfileUpdateRequest;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Schema;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class ProfileController extends Controller
+{
+    /**
+     * Display the user's profile form.
+     */
+    public function edit(Request $request): Response
+    {
+        return Inertia::render('Profile/Edit', [
+            'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
+            'status' => session('status'),
+        ]);
+    }
+
+    /**
+     * Update the user's profile information.
+     */
+    public function update(ProfileUpdateRequest $request): RedirectResponse
+    {
+        $data = $request->validated();
+        if (isset($data['name']) && ! isset($data['full_name'])) {
+            $data['full_name'] = $data['name'];
+        }
+
+        $request->user()->fill($data);
+
+        if ($request->user()->isDirty('email') && Schema::hasColumn('users', 'email_verified_at')) {
+            $request->user()->email_verified_at = null;
+        }
+
+        $request->user()->save();
+
+        return Redirect::route('profile.edit');
+    }
+
+    /**
+     * Delete the user's account.
+     */
+    public function destroy(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'password' => ['required', 'current_password'],
+        ]);
+
+        $user = $request->user();
+
+        Auth::logout();
+
+        $user->delete();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return Redirect::to('/');
+    }
+}
+</file>
+
+<file path="app/Http/Middleware/HandleInertiaRequests.php">
+<?php
+
+namespace App\Http\Middleware;
+
+use Illuminate\Http\Request;
+use Inertia\Middleware;
+
+class HandleInertiaRequests extends Middleware
+{
+    /**
+     * The root template that is loaded on the first page visit.
+     *
+     * @var string
+     */
+    protected $rootView = 'app';
+
+    /**
+     * Determine the current asset version.
+     */
+    public function version(Request $request): ?string
+    {
+        return parent::version($request);
+    }
+
+    /**
+     * Define the props that are shared by default.
+     *
+     * @return array<string, mixed>
+     */
+    public function share(Request $request): array
+    {
+        $user = $request->user();
+
+        return [
+            ...parent::share($request),
+            'auth' => [
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'username' => $user->username,
+                    'full_name' => $user->full_name,
+                    'name' => $user->full_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'role' => $user->role,
+                    'status' => $user->status,
+                    'roles' => $user->roles->pluck('name')->toArray(),
+                    'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
+                ] : null,
+            ],
+        ];
+    }
+}
+</file>
+
+<file path="app/Http/Requests/Auth/LoginRequest.php">
+<?php
+
+namespace App\Http\Requests\Auth;
+
+use App\Models\User;
+use Illuminate\Auth\Events\Lockout;
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class LoginRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {
+        return [
+            'login' => ['sometimes', 'nullable', 'string'],
+            'email' => ['sometimes', 'nullable', 'string'],
+            'username' => ['sometimes', 'nullable', 'string'],
+            'password' => ['required', 'string'],
+        ];
+    }
+
+    /**
+     * Configure the validator instance.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
+            if (empty($identifier)) {
+                $validator->errors()->add('email', __('The email or username field is required.'));
+            }
+        });
+    }
+
+    /**
+     * Attempt to authenticate the request's credentials.
+     *
+     * @throws ValidationException
+     */
+    public function authenticate(): void
+    {
+        $this->ensureIsNotRateLimited();
+
+        $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
+        $isEmail = filter_var($identifier, FILTER_VALIDATE_EMAIL);
+        $field = $isEmail ? 'email' : 'username';
+
+        $user = User::where($field, $identifier)->first();
+
+        if ($user && ! $user->isActive()) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => __('Your account has been deactivated. Please contact the administrator.'),
+            ]);
+        }
+
+        $credentials = [
+            $field => $identifier,
+            'password' => $this->string('password'),
+        ];
+
+        if (! Auth::attempt($credentials, $this->boolean('remember'))) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => trans('auth.failed'),
+            ]);
+        }
+
+        RateLimiter::clear($this->throttleKey());
+    }
+
+    /**
+     * Ensure the login request is not rate limited.
+     *
+     * @throws ValidationException
+     */
+    public function ensureIsNotRateLimited(): void
+    {
+        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
+            return;
+        }
+
+        event(new Lockout($this));
+
+        $seconds = RateLimiter::availableIn($this->throttleKey());
+
+        throw ValidationException::withMessages([
+            'email' => trans('auth.throttle', [
+                'seconds' => $seconds,
+                'minutes' => ceil($seconds / 60),
+            ]),
+        ]);
+    }
+
+    /**
+     * Get the rate limiting throttle key for the request.
+     */
+    public function throttleKey(): string
+    {
+        $identifier = (string) ($this->input('login') ?? $this->input('email') ?? $this->input('username'));
+
+        return Str::transliterate(Str::lower($identifier).'|'.$this->ip());
+    }
+}
+</file>
+
 <file path="app/Models/BalanceTopup.php">
 <?php
 
@@ -15050,19 +14670,34 @@ class Product extends Model implements Auditable
 
 namespace App\Models;
 
+use Database\Factories\StudentAccountFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Contracts\Auditable;
 
 class StudentAccount extends Model implements Auditable
 {
-    use \OwenIt\Auditing\Auditable, SoftDeletes;
+    /** @use HasFactory<StudentAccountFactory> */
+    use HasFactory, \OwenIt\Auditing\Auditable, SoftDeletes;
 
     protected $fillable = [
         'student_id_number', 'rfid_uid', 'first_name', 'last_name',
         'grade_level', 'section', 'parent_id', 'current_balance',
         'daily_spending_limit', 'is_spending_limited', 'status',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'current_balance' => 'decimal:2',
+            'daily_spending_limit' => 'decimal:2',
+            'is_spending_limited' => 'boolean',
+        ];
+    }
 
     // Connects back to the User model (Parent Dashboard)
     public function parent()
@@ -15121,46 +14756,6 @@ class Transaction extends Model implements Auditable
         return $this->hasMany(TransactionDetail::class);
     }
 }
-</file>
-
-<file path="bootstrap/app.php">
-<?php
-
-use App\Http\Middleware\EnsureUserIsActive;
-use App\Http\Middleware\HandleInertiaRequests;
-use Illuminate\Foundation\Application;
-use Illuminate\Foundation\Configuration\Exceptions;
-use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
-use Illuminate\Http\Request;
-use Spatie\Permission\Middleware\PermissionMiddleware;
-use Spatie\Permission\Middleware\RoleMiddleware;
-use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
-
-return Application::configure(basePath: dirname(__DIR__))
-    ->withRouting(
-        web: __DIR__.'/../routes/web.php',
-        commands: __DIR__.'/../routes/console.php',
-        health: '/up',
-    )
-    ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->web(append: [
-            HandleInertiaRequests::class,
-            AddLinkHeadersForPreloadedAssets::class,
-        ]);
-
-        $middleware->alias([
-            'role' => RoleMiddleware::class,
-            'permission' => PermissionMiddleware::class,
-            'role_or_permission' => RoleOrPermissionMiddleware::class,
-            'active' => EnsureUserIsActive::class,
-        ]);
-    })
-    ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
-        );
-    })->create();
 </file>
 
 <file path="config/audit.php">
@@ -15689,6 +15284,323 @@ return new class extends Migration
         Schema::connection($connection)->drop($table);
     }
 };
+</file>
+
+<file path="resources/js/actions/App/Http/Controllers/Auth/AuthenticatedSessionController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+
+create.definition = {
+    methods: ["get","head"],
+    url: '/login',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+create.url = (options?: RouteQueryOptions) => {
+    return create.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::create
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: create.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
+ * @route '/login'
+ */
+export const store = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: store.url(options),
+    method: 'post',
+})
+
+store.definition = {
+    methods: ["post"],
+    url: '/login',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
+ * @route '/login'
+ */
+store.url = (options?: RouteQueryOptions) => {
+    return store.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::store
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:30
+ * @route '/login'
+ */
+store.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: store.url(options),
+    method: 'post',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+export const destroy = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: destroy.url(options),
+    method: 'post',
+})
+
+destroy.definition = {
+    methods: ["post"],
+    url: '/logout',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+destroy.url = (options?: RouteQueryOptions) => {
+    return destroy.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::destroy
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+destroy.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: destroy.url(options),
+    method: 'post',
+})
+const AuthenticatedSessionController = { create, store, destroy }
+
+export default AuthenticatedSessionController
+</file>
+
+<file path="resources/js/actions/App/Http/Controllers/Auth/RegisteredUserController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::create
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+
+create.definition = {
+    methods: ["get","head"],
+    url: '/register',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::create
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+create.url = (options?: RouteQueryOptions) => {
+    return create.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::create
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::create
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: create.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::store
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
+ * @route '/register'
+ */
+export const store = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: store.url(options),
+    method: 'post',
+})
+
+store.definition = {
+    methods: ["post"],
+    url: '/register',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::store
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
+ * @route '/register'
+ */
+store.url = (options?: RouteQueryOptions) => {
+    return store.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::store
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:33
+ * @route '/register'
+ */
+store.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: store.url(options),
+    method: 'post',
+})
+const RegisteredUserController = { create, store }
+
+export default RegisteredUserController
+</file>
+
+<file path="resources/js/actions/App/Http/Controllers/ProfileController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/profile',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
+ */
+export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+update.definition = {
+    methods: ["patch"],
+    url: '/profile',
+} satisfies RouteDefinition<["patch"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
+ */
+update.url = (options?: RouteQueryOptions) => {
+    return update.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
+ */
+update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
+ */
+export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+
+destroy.definition = {
+    methods: ["delete"],
+    url: '/profile',
+} satisfies RouteDefinition<["delete"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
+ */
+destroy.url = (options?: RouteQueryOptions) => {
+    return destroy.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
+ */
+destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+const ProfileController = { edit, update, destroy }
+
+export default ProfileController
 </file>
 
 <file path="resources/js/Components/ApplicationLogo.tsx">
@@ -18588,11 +18500,185 @@ export default function UpdateProfileInformation({
 }
 </file>
 
-<file path="resources/js/routes/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../wayfinder'
+<file path="resources/js/routes/admin/audit-logs/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:22
- * @route '/dashboard'
+ * @see routes/web.php:63
+ * @route '/admin/audit-logs'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+
+index.definition = {
+    methods: ["get","head"],
+    url: '/admin/audit-logs',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:63
+ * @route '/admin/audit-logs'
+ */
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:63
+ * @route '/admin/audit-logs'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:63
+ * @route '/admin/audit-logs'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
+    method: 'head',
+})
+const auditLogs = {
+    index: Object.assign(index, index),
+}
+
+export default auditLogs
+</file>
+
+<file path="resources/js/routes/admin/products/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
+/**
+ * @see routes/web.php:51
+ * @route '/admin/products'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+
+index.definition = {
+    methods: ["get","head"],
+    url: '/admin/products',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:51
+ * @route '/admin/products'
+ */
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:51
+ * @route '/admin/products'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:51
+ * @route '/admin/products'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
+    method: 'head',
+})
+
+/**
+ * @see routes/web.php:55
+ * @route '/admin/products/create'
+ */
+export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+
+create.definition = {
+    methods: ["get","head"],
+    url: '/admin/products/create',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:55
+ * @route '/admin/products/create'
+ */
+create.url = (options?: RouteQueryOptions) => {
+    return create.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:55
+ * @route '/admin/products/create'
+ */
+create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:55
+ * @route '/admin/products/create'
+ */
+create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: create.url(options),
+    method: 'head',
+})
+
+/**
+ * @see routes/web.php:59
+ * @route '/admin/products/edit'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/admin/products/edit',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:59
+ * @route '/admin/products/edit'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:59
+ * @route '/admin/products/edit'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:59
+ * @route '/admin/products/edit'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
+    method: 'head',
+})
+const products = {
+    index: Object.assign(index, index),
+create: Object.assign(create, create),
+edit: Object.assign(edit, edit),
+}
+
+export default products
+</file>
+
+<file path="resources/js/routes/parent/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
+/**
+ * @see routes/web.php:40
+ * @route '/parent/dashboard'
  */
 export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     url: dashboard.url(options),
@@ -18601,153 +18687,206 @@ export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> =
 
 dashboard.definition = {
     methods: ["get","head"],
-    url: '/dashboard',
+    url: '/parent/dashboard',
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:22
- * @route '/dashboard'
+ * @see routes/web.php:40
+ * @route '/parent/dashboard'
  */
 dashboard.url = (options?: RouteQueryOptions) => {
     return dashboard.definition.url + queryParams(options)
 }
 
 /**
- * @see routes/web.php:22
- * @route '/dashboard'
+ * @see routes/web.php:40
+ * @route '/parent/dashboard'
  */
 dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     url: dashboard.url(options),
     method: 'get',
 })
 /**
- * @see routes/web.php:22
- * @route '/dashboard'
+ * @see routes/web.php:40
+ * @route '/parent/dashboard'
  */
 dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
     url: dashboard.url(options),
     method: 'head',
 })
+const parent = {
+    dashboard: Object.assign(dashboard, dashboard),
+}
 
+export default parent
+</file>
+
+<file path="resources/js/routes/pos/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:33
+ * @route '/pos'
  */
-export const register = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: register.url(options),
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
     method: 'get',
 })
 
-register.definition = {
+index.definition = {
     methods: ["get","head"],
-    url: '/register',
+    url: '/pos',
 } satisfies RouteDefinition<["get","head"]>
 
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:33
+ * @route '/pos'
  */
-register.url = (options?: RouteQueryOptions) => {
-    return register.definition.url + queryParams(options)
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
 }
 
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:33
+ * @route '/pos'
  */
-register.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: register.url(options),
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
     method: 'get',
 })
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:33
+ * @route '/pos'
  */
-register.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: register.url(options),
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
+    method: 'head',
+})
+const pos = {
+    index: Object.assign(index, index),
+}
+
+export default pos
+</file>
+
+<file path="resources/js/routes/profile/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/profile',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:19
+ * @route '/profile'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
     method: 'head',
 })
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
  */
-export const login = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: login.url(options),
-    method: 'get',
+export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
 })
 
-login.definition = {
-    methods: ["get","head"],
-    url: '/login',
-} satisfies RouteDefinition<["get","head"]>
+update.definition = {
+    methods: ["patch"],
+    url: '/profile',
+} satisfies RouteDefinition<["patch"]>
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
  */
-login.url = (options?: RouteQueryOptions) => {
-    return login.definition.url + queryParams(options)
+update.url = (options?: RouteQueryOptions) => {
+    return update.definition.url + queryParams(options)
 }
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:30
+ * @route '/profile'
  */
-login.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: login.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-login.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: login.url(options),
-    method: 'head',
+update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
 })
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
  */
-export const logout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: logout.url(options),
-    method: 'post',
+export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
 })
 
-logout.definition = {
-    methods: ["post"],
-    url: '/logout',
-} satisfies RouteDefinition<["post"]>
+destroy.definition = {
+    methods: ["delete"],
+    url: '/profile',
+} satisfies RouteDefinition<["delete"]>
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
  */
-logout.url = (options?: RouteQueryOptions) => {
-    return logout.definition.url + queryParams(options)
+destroy.url = (options?: RouteQueryOptions) => {
+    return destroy.definition.url + queryParams(options)
 }
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:51
+ * @route '/profile'
  */
-logout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: logout.url(options),
-    method: 'post',
+destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
 })
+const profile = {
+    edit: Object.assign(edit, edit),
+update: Object.assign(update, update),
+destroy: Object.assign(destroy, destroy),
+}
+
+export default profile
 </file>
 
 <file path="resources/js/types/global.d.ts">
@@ -18764,6 +18903,30 @@ declare global {
 declare module '@inertiajs/core' {
     interface PageProps extends InertiaPageProps, AppPageProps {}
 }
+</file>
+
+<file path="resources/js/types/index.d.ts">
+export interface User {
+    id: number;
+    username: string;
+    full_name: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    role: 'admin' | 'cashier' | 'parent' | 'faculty' | 'student';
+    status: 'active' | 'inactive';
+    roles?: string[];
+    permissions?: string[];
+    email_verified_at?: string;
+}
+
+export type PageProps<
+    T extends Record<string, unknown> = Record<string, unknown>,
+> = T & {
+    auth: {
+        user: User;
+    };
+};
 </file>
 
 <file path="resources/views/app.blade.php">
@@ -18788,6 +18951,346 @@ declare module '@inertiajs/core' {
         @inertia
     </body>
 </html>
+</file>
+
+<file path="tests/Feature/Auth/AuthenticationTest.php">
+<?php
+
+use App\Models\User;
+
+test('login screen can be rendered', function () {
+    $response = $this->get('/login');
+
+    $response->assertStatus(200);
+});
+
+test('users can authenticate using the login screen with email', function () {
+    $user = User::factory()->create();
+
+    $response = $this->post('/login', [
+        'email' => $user->email,
+        'password' => 'password',
+    ]);
+
+    $this->assertAuthenticated();
+    $response->assertRedirect(route('admin.products.index', absolute: false));
+});
+
+test('users can authenticate using the login screen with username', function () {
+    $user = User::factory()->create();
+
+    $response = $this->post('/login', [
+        'email' => $user->username,
+        'password' => 'password',
+    ]);
+
+    $this->assertAuthenticated();
+    $response->assertRedirect(route('admin.products.index', absolute: false));
+});
+
+test('users can not authenticate with invalid password', function () {
+    $user = User::factory()->create();
+
+    $this->post('/login', [
+        'email' => $user->email,
+        'password' => 'wrong-password',
+    ]);
+
+    $this->assertGuest();
+});
+
+test('users can logout', function () {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->post('/logout');
+
+    $this->assertGuest();
+    $response->assertRedirect('/');
+});
+</file>
+
+<file path="tests/Feature/Auth/EmailVerificationTest.php">
+<?php
+
+use App\Models\User;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL;
+
+beforeEach(function () {
+    if (! Schema::hasColumn('users', 'email_verified_at')) {
+        test()->markTestSkipped('Email verification is not enabled in this application.');
+    }
+});
+
+test('email verification screen can be rendered', function () {
+    $user = User::factory()->unverified()->create();
+
+    $response = $this->actingAs($user)->get('/verify-email');
+
+    $response->assertStatus(200);
+});
+
+test('email can be verified', function () {
+    $user = User::factory()->unverified()->create();
+
+    Event::fake();
+
+    $verificationUrl = URL::temporarySignedRoute(
+        'verification.verify',
+        now()->addMinutes(60),
+        ['id' => $user->id, 'hash' => sha1($user->email)]
+    );
+
+    $response = $this->actingAs($user)->get($verificationUrl);
+
+    Event::assertDispatched(Verified::class);
+    expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
+    $response->assertRedirect(route('dashboard', absolute: false).'?verified=1');
+});
+
+test('email is not verified with invalid hash', function () {
+    $user = User::factory()->unverified()->create();
+
+    $verificationUrl = URL::temporarySignedRoute(
+        'verification.verify',
+        now()->addMinutes(60),
+        ['id' => $user->id, 'hash' => sha1('wrong-email')]
+    );
+
+    $this->actingAs($user)->get($verificationUrl);
+
+    expect($user->fresh()->hasVerifiedEmail())->toBeFalse();
+});
+</file>
+
+<file path="tests/Feature/Auth/RegistrationTest.php">
+<?php
+
+test('registration screen can be rendered', function () {
+    $response = $this->get('/register');
+
+    $response->assertStatus(200);
+});
+
+test('new users can register', function () {
+    $response = $this->post('/register', [
+        'name' => 'Test User',
+        'email' => 'test@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+    ]);
+
+    $this->assertAuthenticated();
+    $response->assertRedirect(route('parent.dashboard', absolute: false));
+});
+</file>
+
+<file path="tests/Feature/ExampleTest.php">
+<?php
+
+it('returns a successful response', function () {
+    $response = $this->get('/');
+
+    $response->assertRedirect('/login');
+});
+</file>
+
+<file path="tests/Feature/ModelRelationshipsTest.php">
+<?php
+
+use App\Models\Category;
+use App\Models\InventoryLog;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
+use App\Models\User;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use OwenIt\Auditing\Auditable;
+use Spatie\Permission\Traits\HasRoles;
+
+test('category has many products and supports soft deletes', function () {
+    $category = Category::factory()->create();
+    $product = Product::factory()->create([
+        'category_id' => $category->id,
+    ]);
+
+    expect($category->products)->toHaveCount(1)
+        ->and($category->products->first()->id)->toBe($product->id)
+        ->and($product->category->id)->toBe($category->id);
+
+    $category->delete();
+    expect(Category::find($category->id))->toBeNull()
+        ->and(Category::withTrashed()->find($category->id))->not->toBeNull();
+});
+
+test('transaction detail belongs to transaction and product with disabled timestamps', function () {
+    $transaction = Transaction::factory()->create();
+    $product = Product::factory()->create();
+
+    $detail = TransactionDetail::factory()->create([
+        'transaction_id' => $transaction->id,
+        'product_id' => $product->id,
+        'quantity' => 3,
+        'unit_price' => 15.50,
+        'subtotal' => 46.50,
+    ]);
+
+    expect($detail->timestamps)->toBeFalse()
+        ->and($detail->transaction->id)->toBe($transaction->id)
+        ->and($detail->product->id)->toBe($product->id)
+        ->and($transaction->details)->toHaveCount(1)
+        ->and($transaction->details->first()->id)->toBe($detail->id)
+        ->and($product->transactionDetails)->toHaveCount(1)
+        ->and($product->transactionDetails->first()->id)->toBe($detail->id);
+});
+
+test('inventory log belongs to product and user and connects to inverse relations', function () {
+    $user = User::factory()->create();
+    $product = Product::factory()->create();
+
+    $log = InventoryLog::factory()->create([
+        'product_id' => $product->id,
+        'user_id' => $user->id,
+        'action' => 'restock',
+        'quantity_changed' => 10,
+        'previous_stock' => 5,
+        'new_stock' => 15,
+    ]);
+
+    expect($log->product->id)->toBe($product->id)
+        ->and($log->user->id)->toBe($user->id)
+        ->and($product->inventoryLogs)->toHaveCount(1)
+        ->and($product->inventoryLogs->first()->id)->toBe($log->id)
+        ->and($user->inventoryLogs)->toHaveCount(1)
+        ->and($user->inventoryLogs->first()->id)->toBe($log->id);
+});
+
+test('user model implements auditable, uses expected traits, has fillables, and links to student accounts', function () {
+    $parent = User::factory()->create([
+        'role' => 'parent',
+    ]);
+
+    expect($parent)->toBeInstanceOf(OwenIt\Auditing\Contracts\Auditable::class)
+        ->and(in_array(SoftDeletes::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and(in_array(HasRoles::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and(in_array(Auditable::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and($parent->getFillable())->toEqualCanonicalizing([
+            'username', 'password', 'full_name', 'email', 'phone', 'role', 'status',
+        ]);
+
+    $student = StudentAccount::create([
+        'student_id_number' => 'STU-12345',
+        'first_name' => 'John',
+        'last_name' => 'Doe',
+        'grade_level' => 'Grade 10',
+        'section' => 'St. Francis',
+        'parent_id' => $parent->id,
+        'current_balance' => 150.00,
+        'daily_spending_limit' => 200.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+
+    expect($parent->studentAccounts)->toHaveCount(1)
+        ->and($parent->studentAccounts->first()->id)->toBe($student->id)
+        ->and($student->parent->id)->toBe($parent->id);
+});
+</file>
+
+<file path="tests/Feature/ProfileTest.php">
+<?php
+
+use App\Models\User;
+use Illuminate\Support\Facades\Schema;
+
+test('profile page is displayed', function () {
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->get('/profile');
+
+    $response->assertOk();
+});
+
+test('profile information can be updated', function () {
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->patch('/profile', [
+            'name' => 'Test User',
+            'email' => 'test@example.com',
+        ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertRedirect('/profile');
+
+    $user->refresh();
+
+    $this->assertSame('Test User', $user->name);
+    $this->assertSame('test@example.com', $user->email);
+    $this->assertNull($user->email_verified_at);
+});
+
+test('email verification status is unchanged when the email address is unchanged', function () {
+    if (! Schema::hasColumn('users', 'email_verified_at')) {
+        test()->markTestSkipped('Email verification is not enabled in this application.');
+    }
+
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->patch('/profile', [
+            'name' => 'Test User',
+            'email' => $user->email,
+        ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertRedirect('/profile');
+
+    $this->assertNotNull($user->refresh()->email_verified_at);
+});
+
+test('user can delete their account', function () {
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->delete('/profile', [
+            'password' => 'password',
+        ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertRedirect('/');
+
+    $this->assertGuest();
+    $this->assertTrue($user->fresh()->trashed());
+});
+
+test('correct password must be provided to delete account', function () {
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->from('/profile')
+        ->delete('/profile', [
+            'password' => 'wrong-password',
+        ]);
+
+    $response
+        ->assertSessionHasErrors('password')
+        ->assertRedirect('/profile');
+
+    $this->assertNotNull($user->fresh());
+});
 </file>
 
 <file path="AGENTS.md">
@@ -18993,197 +19496,44 @@ export default defineConfig({
 });
 </file>
 
-<file path="app/Models/User.php">
+<file path="bootstrap/app.php">
 <?php
 
-namespace App\Models;
+use App\Http\Middleware\EnsureUserIsActive;
+use App\Http\Middleware\HandleInertiaRequests;
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
+use Illuminate\Http\Request;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
+use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
-use OwenIt\Auditing\Auditable;
-use OwenIt\Auditing\Contracts\Auditable as AuditableContract;
-use Spatie\Permission\Models\Role;
-use Spatie\Permission\Traits\HasRoles;
-
-class User extends Authenticatable implements AuditableContract
-{
-    use Auditable, HasFactory, HasRoles, Notifiable, SoftDeletes;
-
-    protected $fillable = [
-        'username',
-        'password',
-        'full_name',
-        'email',
-        'phone',
-        'role',
-        'status',
-    ];
-
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
-
-    protected $appends = [
-        'name',
-    ];
-
-    protected function casts(): array
-    {
-        return [
-            'password' => 'hashed',
-        ];
-    }
-
-    protected static function booted(): void
-    {
-        static::saved(function (User $user) {
-            if (! empty($user->role)) {
-                $role = Role::firstOrCreate([
-                    'name' => $user->role,
-                    'guard_name' => 'web',
-                ]);
-
-                if (! $user->hasRole($role)) {
-                    $user->syncRoles([$role]);
-                }
-            }
-        });
-    }
-
-    /**
-     * Compatibility accessor for code referencing $user->name.
-     */
-    public function getNameAttribute(): string
-    {
-        return $this->full_name ?? '';
-    }
-
-    /**
-     * Compatibility mutator for code setting $user->name.
-     */
-    public function setNameAttribute(?string $value): void
-    {
-        $this->attributes['full_name'] = $value;
-    }
-
-    /**
-     * Check if user account is active.
-     */
-    public function isActive(): bool
-    {
-        return $this->status === 'active';
-    }
-
-    /**
-     * Connects a parent user to their children's accounts.
-     */
-    public function studentAccounts(): HasMany
-    {
-        return $this->hasMany(StudentAccount::class, 'parent_id');
-    }
-
-    public function inventoryLogs(): HasMany
-    {
-        return $this->hasMany(InventoryLog::class);
-    }
-}
-</file>
-
-<file path="database/factories/UserFactory.php">
-<?php
-
-namespace Database\Factories;
-
-use App\Models\User;
-use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
-
-/**
- * @extends Factory<User>
- */
-class UserFactory extends Factory
-{
-    /**
-     * The current password being used by the factory.
-     */
-    protected static ?string $password;
-
-    /**
-     * Define the model's default state.
-     *
-     * @return array<string, mixed>
-     */
-    public function definition(): array
-    {
-        return [
-            'username' => fake()->unique()->userName(),
-            'full_name' => fake()->name(),
-            'email' => fake()->unique()->safeEmail(),
-            'phone' => fake()->phoneNumber(),
-            'role' => 'admin',
-            'status' => 'active',
-            'password' => static::$password ??= Hash::make('password'),
-            'remember_token' => Str::random(10),
-        ];
-    }
-
-    /**
-     * Indicate that the model's email address should be unverified.
-     */
-    public function unverified(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->web(append: [
+            HandleInertiaRequests::class,
+            AddLinkHeadersForPreloadedAssets::class,
         ]);
-    }
 
-    public function admin(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => 'admin',
+        $middleware->alias([
+            'role' => RoleMiddleware::class,
+            'permission' => PermissionMiddleware::class,
+            'role_or_permission' => RoleOrPermissionMiddleware::class,
+            'active' => EnsureUserIsActive::class,
         ]);
-    }
-
-    public function cashier(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => 'cashier',
-        ]);
-    }
-
-    public function parent(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => 'parent',
-        ]);
-    }
-
-    public function faculty(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => 'faculty',
-        ]);
-    }
-
-    public function student(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => 'student',
-        ]);
-    }
-
-    public function inactive(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'status' => 'inactive',
-        ]);
-    }
-}
+    })
+    ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->shouldRenderJsonWhen(
+            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+        );
+    })->create();
 </file>
 
 <file path="database/migrations/0001_01_01_000000_create_users_table.php">
@@ -19240,28 +19590,6 @@ return new class extends Migration
         Schema::dropIfExists('sessions');
     }
 };
-</file>
-
-<file path="database/seeders/DatabaseSeeder.php">
-<?php
-
-namespace Database\Seeders;
-
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
-use Illuminate\Database\Seeder;
-
-class DatabaseSeeder extends Seeder
-{
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
-    public function run(): void
-    {
-        $this->call(RolesAndPermissionsSeeder::class);
-    }
-}
 </file>
 
 <file path="resources/css/app.css">
@@ -19798,177 +20126,6 @@ export default function ForgotPassword({ status }: { status?: string }) {
 }
 </file>
 
-<file path="resources/js/Pages/Auth/Login.tsx">
-import ApplicationLogo from '@/Components/ApplicationLogo';
-import { Button } from '@/Components/ui/button';
-import { Checkbox } from '@/Components/ui/checkbox';
-import {
-    Field,
-    FieldError,
-    FieldGroup,
-    FieldLabel,
-} from '@/Components/ui/field';
-import { Input } from '@/Components/ui/input';
-import GuestLayout from '@/Layouts/GuestLayout';
-import { Head, Link, useForm } from '@inertiajs/react';
-import { FormEventHandler } from 'react';
-import { login, register } from '@/routes';
-import { request as requestPassword } from '@/routes/password';
-
-export default function Login({
-    status,
-    canResetPassword,
-}: {
-    status?: string;
-    canResetPassword: boolean;
-}) {
-    const { data, setData, post, processing, errors, reset } = useForm({
-        email: '',
-        password: '',
-        remember: false as boolean,
-    });
-
-    const submit: FormEventHandler = (e) => {
-        e.preventDefault();
-
-        post(login().url, {
-            onFinish: () => reset('password'),
-        });
-    };
-
-    return (
-        <GuestLayout>
-            <Head title="Log in" />
-
-            <div className="flex flex-col gap-6">
-                <form onSubmit={submit}>
-                    <FieldGroup>
-                        <div className="flex flex-col items-center gap-2 text-center">
-                            <Link
-                                href="/"
-                                className="flex flex-col items-center gap-2 font-medium transition-transform hover:scale-105"
-                            >
-                                <ApplicationLogo className="h-24 w-auto drop-shadow-md" />
-                                <span className="sr-only">
-                                    Saint Theresa College of Tandag, Inc.
-                                </span>
-                            </Link>
-                            <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
-                                Welcome to CPOSIMS
-                            </h1>
-                            <p className="text-sm text-zinc-300">
-                                Don&apos;t have an account?{' '}
-                                <Link
-                                    href={register().url}
-                                    className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
-                                >
-                                    Sign up
-                                </Link>
-                            </p>
-                        </div>
-
-                        {status && (
-                            <div className="rounded-md border border-emerald-400/30 bg-emerald-950/60 px-3 py-2 text-sm text-emerald-200">
-                                {status}
-                            </div>
-                        )}
-
-                        <Field>
-                            <FieldLabel htmlFor="email" className="text-sm font-medium text-zinc-200">
-                                Username or Email
-                            </FieldLabel>
-                            <Input
-                                id="email"
-                                type="text"
-                                name="email"
-                                value={data.email}
-                                placeholder="Enter username or email"
-                                autoComplete="username"
-                                autoFocus
-                                required
-                                aria-invalid={!!errors.email}
-                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
-                                onChange={(e) => setData('email', e.target.value)}
-                            />
-                            {errors.email && (
-                                <FieldError className="text-xs text-red-400" errors={[{ message: errors.email }]} />
-                            )}
-                        </Field>
-
-                        <Field>
-                            <div className="flex items-center justify-between">
-                                <FieldLabel htmlFor="password" className="text-sm font-medium text-zinc-200">
-                                    Password
-                                </FieldLabel>
-                                {canResetPassword && (
-                                    <Link
-                                        href={requestPassword().url}
-                                        className="text-xs text-zinc-300 underline underline-offset-4 hover:text-white"
-                                    >
-                                        Forgot password?
-                                    </Link>
-                                )}
-                            </div>
-                            <Input
-                                id="password"
-                                type="password"
-                                name="password"
-                                value={data.password}
-                                placeholder="••••••••"
-                                autoComplete="current-password"
-                                required
-                                aria-invalid={!!errors.password}
-                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
-                                onChange={(e) =>
-                                    setData('password', e.target.value)
-                                }
-                            />
-                            {errors.password && (
-                                <FieldError
-                                    className="text-xs text-red-400"
-                                    errors={[{ message: errors.password }]}
-                                />
-                            )}
-                        </Field>
-
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="remember"
-                                checked={data.remember}
-                                className="border-white/30 data-checked:bg-blue-500 data-checked:border-blue-500 data-checked:text-white-950"
-                                onCheckedChange={(checked) =>
-                                    setData('remember', checked === true)
-                                }
-                            />
-                            <label
-                                htmlFor="remember"
-                                className="cursor-pointer text-sm font-medium leading-none text-zinc-200 select-none hover:text-white"
-                            >
-                                Remember me
-                            </label>
-                        </div>
-
-                        <Field>
-                            <Button
-                                type="submit"
-                                className="h-10 w-full bg-[#7a1420] font-semibold text-white shadow-lg transition-all hover:bg-[#921927] hover:shadow-red-950/40 disabled:opacity-50"
-                                disabled={processing}
-                            >
-                                {processing ? 'Logging in...' : 'Login'}
-                            </Button>
-                        </Field>
-                    </FieldGroup>
-                </form>
-
-                <p className="px-6 text-center text-xs text-zinc-400">
-                    Saint Theresa College of Tandag, Inc. &bull; CPOSIMS
-                </p>
-            </div>
-        </GuestLayout>
-    );
-}
-</file>
-
 <file path="resources/js/Pages/Auth/Register.tsx">
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import { Button } from '@/Components/ui/button';
@@ -20435,82 +20592,166 @@ export default function VerifyEmail({ status }: { status?: string }) {
 }
 </file>
 
-<file path="routes/web.php">
-<?php
+<file path="resources/js/routes/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../wayfinder'
+/**
+ * @see routes/web.php:22
+ * @route '/dashboard'
+ */
+export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: dashboard.url(options),
+    method: 'get',
+})
 
-use App\Http\Controllers\ProfileController;
-use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
+dashboard.definition = {
+    methods: ["get","head"],
+    url: '/dashboard',
+} satisfies RouteDefinition<["get","head"]>
 
-// Root redirect based on role or to login
-Route::get('/', function () {
-    if (auth()->check()) {
-        return match (auth()->user()->role) {
-            'admin' => redirect()->route('admin.products.index'),
-            'cashier' => redirect()->route('pos.index'),
-            'parent' => redirect()->route('parent.dashboard'),
-            default => redirect()->route('dashboard'),
-        };
-    }
+/**
+ * @see routes/web.php:22
+ * @route '/dashboard'
+ */
+dashboard.url = (options?: RouteQueryOptions) => {
+    return dashboard.definition.url + queryParams(options)
+}
 
-    return redirect()->route('login');
-});
+/**
+ * @see routes/web.php:22
+ * @route '/dashboard'
+ */
+dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: dashboard.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:22
+ * @route '/dashboard'
+ */
+dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: dashboard.url(options),
+    method: 'head',
+})
 
-// Central Dashboard redirector
-Route::get('/dashboard', function () {
-    return match (auth()->user()->role) {
-        'admin' => redirect()->route('admin.products.index'),
-        'cashier' => redirect()->route('pos.index'),
-        'parent' => redirect()->route('parent.dashboard'),
-        default => Inertia::render('Dashboard'),
-    };
-})->middleware(['auth', 'active'])->name('dashboard');
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+export const register = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: register.url(options),
+    method: 'get',
+})
 
-// POS Portal - Cashier & Admin Access
-Route::middleware(['auth', 'active', 'role:cashier|admin'])->group(function () {
-    Route::get('/pos', function () {
-        return Inertia::render('POS/Index');
-    })->name('pos.index');
-});
+register.definition = {
+    methods: ["get","head"],
+    url: '/register',
+} satisfies RouteDefinition<["get","head"]>
 
-// Parent Dashboard - Parent & Admin Access
-Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
-    Route::get('/parent/dashboard', function () {
-        return Inertia::render('ParentDashboard/Index');
-    })->name('parent.dashboard');
-});
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.url = (options?: RouteQueryOptions) => {
+    return register.definition.url + queryParams(options)
+}
 
-// Admin Panel Routes - Admin Access
-Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
-    Route::get('/', function () {
-        return redirect()->route('admin.products.index');
-    });
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: register.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: register.url(options),
+    method: 'head',
+})
 
-    Route::get('/products', function () {
-        return Inertia::render('Admin/Products/Index');
-    })->name('products.index');
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+export const login = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: login.url(options),
+    method: 'get',
+})
 
-    Route::get('/products/create', function () {
-        return Inertia::render('Admin/Products/Create');
-    })->name('products.create');
+login.definition = {
+    methods: ["get","head"],
+    url: '/login',
+} satisfies RouteDefinition<["get","head"]>
 
-    Route::get('/products/edit', function () {
-        return Inertia::render('Admin/Products/Edit');
-    })->name('products.edit');
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.url = (options?: RouteQueryOptions) => {
+    return login.definition.url + queryParams(options)
+}
 
-    Route::get('/audit-logs', function () {
-        return Inertia::render('Admin/AuditLogs/Index');
-    })->name('audit-logs.index');
-});
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: login.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: login.url(options),
+    method: 'head',
+})
 
-// Profile Management
-Route::middleware(['auth', 'active'])->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-});
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+export const logout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: logout.url(options),
+    method: 'post',
+})
 
-require __DIR__.'/auth.php';
+logout.definition = {
+    methods: ["post"],
+    url: '/logout',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+logout.url = (options?: RouteQueryOptions) => {
+    return logout.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+logout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: logout.url(options),
+    method: 'post',
+})
 </file>
 
 <file path="boost.json">
@@ -20635,6 +20876,473 @@ export default {
     },
     "include": ["resources/js/**/*.ts", "resources/js/**/*.tsx", "resources/js/**/*.d.ts"]
 }
+</file>
+
+<file path="app/Models/User.php">
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use OwenIt\Auditing\Auditable;
+use OwenIt\Auditing\Contracts\Auditable as AuditableContract;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\Traits\HasRoles;
+
+class User extends Authenticatable implements AuditableContract
+{
+    use Auditable, HasFactory, HasRoles, Notifiable, SoftDeletes;
+
+    protected $fillable = [
+        'username',
+        'password',
+        'full_name',
+        'email',
+        'phone',
+        'role',
+        'status',
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
+    protected $appends = [
+        'name',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'password' => 'hashed',
+        ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (User $user) {
+            if (! empty($user->role)) {
+                $role = Role::firstOrCreate([
+                    'name' => $user->role,
+                    'guard_name' => 'web',
+                ]);
+
+                if (! $user->hasRole($role)) {
+                    $user->syncRoles([$role]);
+                }
+            }
+        });
+    }
+
+    /**
+     * Compatibility accessor for code referencing $user->name.
+     */
+    public function getNameAttribute(): string
+    {
+        return $this->full_name ?? '';
+    }
+
+    /**
+     * Compatibility mutator for code setting $user->name.
+     */
+    public function setNameAttribute(?string $value): void
+    {
+        $this->attributes['full_name'] = $value;
+    }
+
+    /**
+     * Check if user account is active.
+     */
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
+    }
+
+    /**
+     * Connects a parent user to their children's accounts.
+     */
+    public function studentAccounts(): HasMany
+    {
+        return $this->hasMany(StudentAccount::class, 'parent_id');
+    }
+
+    public function inventoryLogs(): HasMany
+    {
+        return $this->hasMany(InventoryLog::class);
+    }
+}
+</file>
+
+<file path="database/factories/UserFactory.php">
+<?php
+
+namespace Database\Factories;
+
+use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+
+/**
+ * @extends Factory<User>
+ */
+class UserFactory extends Factory
+{
+    /**
+     * The current password being used by the factory.
+     */
+    protected static ?string $password;
+
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+            'username' => fake()->unique()->userName(),
+            'full_name' => fake()->name(),
+            'email' => fake()->unique()->safeEmail(),
+            'phone' => fake()->phoneNumber(),
+            'role' => 'admin',
+            'status' => 'active',
+            'password' => static::$password ??= Hash::make('password'),
+            'remember_token' => Str::random(10),
+        ];
+    }
+
+    /**
+     * Indicate that the model's email address should be unverified.
+     */
+    public function unverified(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'email_verified_at' => null,
+        ]);
+    }
+
+    public function admin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'admin',
+        ]);
+    }
+
+    public function cashier(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'cashier',
+        ]);
+    }
+
+    public function parent(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'parent',
+        ]);
+    }
+
+    public function faculty(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'faculty',
+        ]);
+    }
+
+    public function student(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'student',
+        ]);
+    }
+
+    public function inactive(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => 'inactive',
+        ]);
+    }
+}
+</file>
+
+<file path="database/seeders/DatabaseSeeder.php">
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    use WithoutModelEvents;
+
+    /**
+     * Seed the application's database.
+     */
+    public function run(): void
+    {
+        $this->call(RolesAndPermissionsSeeder::class);
+    }
+}
+</file>
+
+<file path="resources/js/Pages/Auth/Login.tsx">
+import ApplicationLogo from '@/Components/ApplicationLogo';
+import { Button } from '@/Components/ui/button';
+import { Checkbox } from '@/Components/ui/checkbox';
+import {
+    Field,
+    FieldError,
+    FieldGroup,
+    FieldLabel,
+} from '@/Components/ui/field';
+import { Input } from '@/Components/ui/input';
+import GuestLayout from '@/Layouts/GuestLayout';
+import { Head, Link, useForm } from '@inertiajs/react';
+import { FormEventHandler } from 'react';
+import { login, register } from '@/routes';
+import { request as requestPassword } from '@/routes/password';
+
+export default function Login({
+    status,
+    canResetPassword,
+}: {
+    status?: string;
+    canResetPassword: boolean;
+}) {
+    const { data, setData, post, processing, errors, reset } = useForm({
+        email: '',
+        password: '',
+        remember: false as boolean,
+    });
+
+    const submit: FormEventHandler = (e) => {
+        e.preventDefault();
+
+        post(login().url, {
+            onFinish: () => reset('password'),
+        });
+    };
+
+    return (
+        <GuestLayout>
+            <Head title="Log in" />
+
+            <div className="flex flex-col gap-6">
+                <form onSubmit={submit}>
+                    <FieldGroup>
+                        <div className="flex flex-col items-center gap-2 text-center">
+                            <Link
+                                href="/"
+                                className="flex flex-col items-center gap-2 font-medium transition-transform hover:scale-105"
+                            >
+                                <ApplicationLogo className="h-24 w-auto drop-shadow-md" />
+                                <span className="sr-only">
+                                    Saint Theresa College of Tandag, Inc.
+                                </span>
+                            </Link>
+                            <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
+                                Welcome to CPOSIMS
+                            </h1>
+                            <p className="text-sm text-zinc-300">
+                                Don&apos;t have an account?{' '}
+                                <Link
+                                    href={register().url}
+                                    className="font-semibold text-amber-400 underline underline-offset-4 hover:text-amber-300"
+                                >
+                                    Sign up
+                                </Link>
+                            </p>
+                        </div>
+
+                        {status && (
+                            <div className="rounded-md border border-emerald-400/30 bg-emerald-950/60 px-3 py-2 text-sm text-emerald-200">
+                                {status}
+                            </div>
+                        )}
+
+                        <Field>
+                            <FieldLabel htmlFor="email" className="text-sm font-medium text-zinc-200">
+                                Username or Email
+                            </FieldLabel>
+                            <Input
+                                id="email"
+                                type="text"
+                                name="email"
+                                value={data.email}
+                                placeholder="Enter username or email"
+                                autoComplete="username"
+                                autoFocus
+                                required
+                                aria-invalid={!!errors.email}
+                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
+                                onChange={(e) => setData('email', e.target.value)}
+                            />
+                            {errors.email && (
+                                <FieldError className="text-xs text-red-400" errors={[{ message: errors.email }]} />
+                            )}
+                        </Field>
+
+                        <Field>
+                            <div className="flex items-center justify-between">
+                                <FieldLabel htmlFor="password" className="text-sm font-medium text-zinc-200">
+                                    Password
+                                </FieldLabel>
+                                {canResetPassword && (
+                                    <Link
+                                        href={requestPassword().url}
+                                        className="text-xs text-zinc-300 underline underline-offset-4 hover:text-white"
+                                    >
+                                        Forgot password?
+                                    </Link>
+                                )}
+                            </div>
+                            <Input
+                                id="password"
+                                type="password"
+                                name="password"
+                                value={data.password}
+                                placeholder="••••••••"
+                                autoComplete="current-password"
+                                required
+                                aria-invalid={!!errors.password}
+                                className="h-10 border-white/20 bg-white/10 text-white placeholder:text-zinc-400 focus-visible:border-blue-400 focus-visible:ring-blue-400/30"
+                                onChange={(e) =>
+                                    setData('password', e.target.value)
+                                }
+                            />
+                            {errors.password && (
+                                <FieldError
+                                    className="text-xs text-red-400"
+                                    errors={[{ message: errors.password }]}
+                                />
+                            )}
+                        </Field>
+
+                        <div className="flex items-center space-x-2">
+                            <Checkbox
+                                id="remember"
+                                checked={data.remember}
+                                className="border-white/30 data-checked:bg-blue-500 data-checked:border-blue-500 data-checked:text-white-950"
+                                onCheckedChange={(checked) =>
+                                    setData('remember', checked === true)
+                                }
+                            />
+                            <label
+                                htmlFor="remember"
+                                className="cursor-pointer text-sm font-medium leading-none text-zinc-200 select-none hover:text-white"
+                            >
+                                Remember me
+                            </label>
+                        </div>
+
+                        <Field>
+                            <Button
+                                type="submit"
+                                className="h-10 w-full bg-[#7a1420] font-semibold text-white shadow-lg transition-all hover:bg-[#921927] hover:shadow-red-950/40 disabled:opacity-50"
+                                disabled={processing}
+                            >
+                                {processing ? 'Logging in...' : 'Login'}
+                            </Button>
+                        </Field>
+                    </FieldGroup>
+                </form>
+
+                <p className="px-6 text-center text-xs text-zinc-400">
+                    Saint Theresa College of Tandag, Inc. &bull; CPOSIMS
+                </p>
+            </div>
+        </GuestLayout>
+    );
+}
+</file>
+
+<file path="routes/web.php">
+<?php
+
+use App\Http\Controllers\PosCheckoutController;
+use App\Http\Controllers\ProfileController;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+
+// Root redirect based on role or to login
+Route::get('/', function () {
+    if (auth()->check()) {
+        return match (auth()->user()->role) {
+            'admin' => redirect()->route('admin.products.index'),
+            'cashier' => redirect()->route('pos.index'),
+            'parent' => redirect()->route('parent.dashboard'),
+            default => redirect()->route('dashboard'),
+        };
+    }
+
+    return redirect()->route('login');
+});
+
+// Central Dashboard redirector
+Route::get('/dashboard', function () {
+    return match (auth()->user()->role) {
+        'admin' => redirect()->route('admin.products.index'),
+        'cashier' => redirect()->route('pos.index'),
+        'parent' => redirect()->route('parent.dashboard'),
+        default => Inertia::render('Dashboard'),
+    };
+})->middleware(['auth', 'active'])->name('dashboard');
+
+// POS Portal - Cashier & Admin Access
+Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
+    Route::get('/', function () {
+        return Inertia::render('POS/Index');
+    })->name('index');
+
+    Route::post('/checkout', PosCheckoutController::class)->name('checkout');
+});
+
+// Parent Dashboard - Parent & Admin Access
+Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
+    Route::get('/parent/dashboard', function () {
+        return Inertia::render('ParentDashboard/Index');
+    })->name('parent.dashboard');
+});
+
+// Admin Panel Routes - Admin Access
+Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/', function () {
+        return redirect()->route('admin.products.index');
+    });
+
+    Route::get('/products', function () {
+        return Inertia::render('Admin/Products/Index');
+    })->name('products.index');
+
+    Route::get('/products/create', function () {
+        return Inertia::render('Admin/Products/Create');
+    })->name('products.create');
+
+    Route::get('/products/edit', function () {
+        return Inertia::render('Admin/Products/Edit');
+    })->name('products.edit');
+
+    Route::get('/audit-logs', function () {
+        return Inertia::render('Admin/AuditLogs/Index');
+    })->name('audit-logs.index');
+});
+
+// Profile Management
+Route::middleware(['auth', 'active'])->group(function () {
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+});
+
+require __DIR__.'/auth.php';
 </file>
 
 <file path="CLAUDE.md">

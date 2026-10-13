@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PosCheckoutController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -29,10 +30,12 @@ Route::get('/dashboard', function () {
 })->middleware(['auth', 'active'])->name('dashboard');
 
 // POS Portal - Cashier & Admin Access
-Route::middleware(['auth', 'active', 'role:cashier|admin'])->group(function () {
-    Route::get('/pos', function () {
+Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
+    Route::get('/', function () {
         return Inertia::render('POS/Index');
-    })->name('pos.index');
+    })->name('index');
+
+    Route::post('/checkout', PosCheckoutController::class)->name('checkout');
 });
 
 // Parent Dashboard - Parent & Admin Access
