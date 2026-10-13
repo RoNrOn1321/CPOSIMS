@@ -1,6 +1,6 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -14,7 +14,7 @@ index.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -22,7 +22,7 @@ index.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -30,7 +30,7 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -39,7 +39,7 @@ index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 })
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -53,7 +53,7 @@ create.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.url = (options?: RouteQueryOptions) => {
@@ -61,7 +61,7 @@ create.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -69,7 +69,7 @@ create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -78,7 +78,7 @@ create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 })
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -92,7 +92,7 @@ edit.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.url = (options?: RouteQueryOptions) => {
@@ -100,7 +100,7 @@ edit.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -108,7 +108,7 @@ edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({

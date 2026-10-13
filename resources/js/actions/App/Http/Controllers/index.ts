@@ -1,7 +1,9 @@
+import PosCheckoutController from './PosCheckoutController'
 import ProfileController from './ProfileController'
 import Auth from './Auth'
 const Controllers = {
-    ProfileController: Object.assign(ProfileController, ProfileController),
+    PosCheckoutController: Object.assign(PosCheckoutController, PosCheckoutController),
+ProfileController: Object.assign(ProfileController, ProfileController),
 Auth: Object.assign(Auth, Auth),
 }
 

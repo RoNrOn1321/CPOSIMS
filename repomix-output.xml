@@ -201,6 +201,7 @@ resources/
               RegisteredUserController.ts
               VerifyEmailController.ts
             index.ts
+            PosCheckoutController.ts
             ProfileController.ts
           index.ts
         index.ts
@@ -398,689 +399,42 @@ vite.config.js
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/Http/Controllers/PosCheckoutController.php">
-<?php
+<file path="resources/js/actions/App/Http/Controllers/PosCheckoutController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+const PosCheckoutController = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: PosCheckoutController.url(options),
+    method: 'post',
+})
 
-namespace App\Http\Controllers;
-
-use App\Http\Requests\PosCheckoutRequest;
-use App\Models\InventoryLog;
-use App\Models\Product;
-use App\Models\StudentAccount;
-use App\Models\Transaction;
-use App\Models\TransactionDetail;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
-
-class PosCheckoutController extends Controller
-{
-    /**
-     * Handle the POS checkout transaction request.
-     */
-    public function __invoke(PosCheckoutRequest $request): JsonResponse|RedirectResponse
-    {
-        return DB::transaction(function () use ($request) {
-            $paymentMethod = $request->validated('payment_method');
-            $cartItems = $request->validated('items');
-            $amountTendered = (float) $request->validated('amount_tendered');
-            $cashierId = Auth::id();
-
-            // Step A: Product & Inventory Validation with Pessimistic Row Locking
-            $totalAmount = 0.00;
-            $processedItems = [];
-
-            // Aggregate quantities by product_id to validate against concurrent inventory
-            $requestedQuantities = [];
-            foreach ($cartItems as $item) {
-                $productId = $item['product_id'];
-                $requestedQuantities[$productId] = ($requestedQuantities[$productId] ?? 0) + (int) $item['quantity'];
-            }
-
-            foreach ($cartItems as $item) {
-                /** @var Product|null $product */
-                $product = Product::where('id', $item['product_id'])
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $product) {
-                    abort(422, "Product ID {$item['product_id']} does not exist.");
-                }
-
-                if ($product->stock_quantity < $requestedQuantities[$product->id]) {
-                    abort(422, "Insufficient stock for product: {$product->name}. Current stock: {$product->stock_quantity}.");
-                }
-
-                $quantity = (int) $item['quantity'];
-                $unitPrice = (float) $product->price;
-                $subtotal = round($unitPrice * $quantity, 2);
-                $totalAmount = round($totalAmount + $subtotal, 2);
-
-                $processedItems[] = [
-                    'product' => $product,
-                    'quantity' => $quantity,
-                    'unit_price' => $unitPrice,
-                    'subtotal' => $subtotal,
-                ];
-            }
-
-            // Step B: Student Account & RFID Validation (If Cashless)
-            $student = null;
-            $studentAccountId = null;
-            $changeAmount = 0.00;
-
-            if ($paymentMethod === 'cashless') {
-                $rfidUid = $request->validated('rfid_uid');
-
-                /** @var StudentAccount|null $student */
-                $student = StudentAccount::where('rfid_uid', $rfidUid)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $student) {
-                    abort(404, 'Student account not found for provided RFID.');
-                }
-
-                if (in_array($student->status, ['lost_card', 'suspended', 'inactive'], true)) {
-                    abort(403, "Student account is {$student->status}. Transaction blocked.");
-                }
-
-                // Enforce Daily Spending Limits
-                if ($student->is_spending_limited) {
-                    $spentToday = (float) Transaction::where('student_account_id', $student->id)
-                        ->where('status', 'completed')
-                        ->whereDate('created_at', today())
-                        ->sum('total_amount');
-
-                    if (round($spentToday + $totalAmount, 2) > (float) $student->daily_spending_limit) {
-                        abort(403, 'Daily transaction limit exceeded.');
-                    }
-                }
-
-                // Enforce Stored-Value Balance
-                if ((float) $student->current_balance < $totalAmount) {
-                    abort(403, 'Insufficient balance.');
-                }
-
-                // Deduct Balance
-                $student->decrement('current_balance', $totalAmount);
-
-                $studentAccountId = $student->id;
-                $amountTendered = $totalAmount;
-                $changeAmount = 0.00;
-            } else {
-                // Cash Payment Validation
-                if ($amountTendered < $totalAmount) {
-                    abort(422, 'Amount tendered is less than total payable amount.');
-                }
-
-                $changeAmount = round($amountTendered - $totalAmount, 2);
-            }
-
-            // Step C: Record the Master Transaction
-            $datePart = now()->format('Ymd');
-            $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
-            while (Transaction::where('receipt_number', $receiptNumber)->exists()) {
-                $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
-            }
-
-            $transaction = Transaction::create([
-                'receipt_number' => $receiptNumber,
-                'cashier_id' => $cashierId,
-                'student_account_id' => $studentAccountId,
-                'total_amount' => $totalAmount,
-                'payment_method' => $paymentMethod,
-                'amount_tendered' => $amountTendered,
-                'change_amount' => $changeAmount,
-                'status' => 'completed',
-            ]);
-
-            // Step D: Itemize Receipt & Update Inventory
-            $receiptItems = [];
-            foreach ($processedItems as $itemData) {
-                /** @var Product $product */
-                $product = $itemData['product'];
-                $quantity = $itemData['quantity'];
-                $unitPrice = $itemData['unit_price'];
-                $subtotal = $itemData['subtotal'];
-
-                TransactionDetail::create([
-                    'transaction_id' => $transaction->id,
-                    'product_id' => $product->id,
-                    'quantity' => $quantity,
-                    'unit_price' => $unitPrice,
-                    'subtotal' => $subtotal,
-                ]);
-
-                $previousStock = $product->stock_quantity;
-                $product->decrement('stock_quantity', $quantity);
-                $newStock = $previousStock - $quantity;
-                $product->stock_quantity = $newStock;
-
-                InventoryLog::create([
-                    'product_id' => $product->id,
-                    'user_id' => $cashierId,
-                    'action' => 'sale',
-                    'quantity_changed' => $quantity,
-                    'previous_stock' => $previousStock,
-                    'new_stock' => $newStock,
-                    'remarks' => "POS Receipt #{$receiptNumber}",
-                ]);
-
-                $receiptItems[] = [
-                    'product_id' => $product->id,
-                    'name' => $product->name,
-                    'quantity' => $quantity,
-                    'unit_price' => $unitPrice,
-                    'subtotal' => $subtotal,
-                ];
-            }
-
-            // Step E: Response Data for Thermal Printer & Cash Drawer
-            $receiptData = [
-                'transaction_id' => $transaction->id,
-                'receipt_number' => $transaction->receipt_number,
-                'created_at' => $transaction->created_at->toDateTimeString(),
-                'cashier' => Auth::user()?->full_name ?? Auth::user()?->username,
-                'payment_method' => $paymentMethod,
-                'total_amount' => $totalAmount,
-                'amount_tendered' => $amountTendered,
-                'change_amount' => $changeAmount,
-                'student' => $student ? [
-                    'id' => $student->id,
-                    'name' => "{$student->first_name} {$student->last_name}",
-                    'student_id_number' => $student->student_id_number,
-                    'remaining_balance' => (float) $student->current_balance,
-                ] : null,
-                'items' => $receiptItems,
-            ];
-
-            if ($request->wantsJson() && ! $request->header('X-Inertia')) {
-                return response()->json([
-                    'message' => 'Checkout completed successfully.',
-                    'transaction_id' => $transaction->id,
-                    'receipt' => $receiptData,
-                ], 201);
-            }
-
-            return redirect()->route('pos.index')->with([
-                'success' => 'Checkout completed successfully.',
-                'transaction_id' => $transaction->id,
-                'receipt' => $receiptData,
-            ]);
-        });
-    }
-}
-</file>
-
-<file path="app/Http/Requests/PosCheckoutRequest.php">
-<?php
-
-namespace App\Http\Requests;
-
-use Illuminate\Contracts\Validation\ValidationRule;
-use Illuminate\Foundation\Http\FormRequest;
-
-class PosCheckoutRequest extends FormRequest
-{
-    /**
-     * Determine if the user is authorized to make this request.
-     */
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /**
-     * Get the validation rules that apply to the request.
-     *
-     * @return array<string, ValidationRule|array<mixed>|string>
-     */
-    public function rules(): array
-    {
-        return [
-            'payment_method' => ['required', 'string', 'in:cash,cashless'],
-            'rfid_uid' => ['required_if:payment_method,cashless', 'nullable', 'string'],
-            'amount_tendered' => ['required', 'numeric', 'min:0'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
-        ];
-    }
-
-    /**
-     * Get custom messages for validator errors.
-     *
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'rfid_uid.required_if' => 'The RFID UID is required for cashless payment transactions.',
-            'items.required' => 'The cart must contain at least one item.',
-            'items.min' => 'The cart must contain at least one item.',
-            'items.*.product_id.exists' => 'One or more selected products do not exist in the inventory.',
-            'items.*.quantity.min' => 'Item quantity must be at least 1.',
-        ];
-    }
-}
-</file>
-
-<file path="database/factories/StudentAccountFactory.php">
-<?php
-
-namespace Database\Factories;
-
-use App\Models\StudentAccount;
-use App\Models\User;
-use Illuminate\Database\Eloquent\Factories\Factory;
+PosCheckoutController.definition = {
+    methods: ["post"],
+    url: '/pos/checkout',
+} satisfies RouteDefinition<["post"]>
 
 /**
- * @extends Factory<StudentAccount>
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
  */
-class StudentAccountFactory extends Factory
-{
-    /**
-     * Define the model's default state.
-     *
-     * @return array<string, mixed>
-     */
-    public function definition(): array
-    {
-        return [
-            'student_id_number' => fake()->unique()->numerify('2026-####'),
-            'rfid_uid' => fake()->unique()->regexify('[A-F0-9]{14}'),
-            'first_name' => fake()->firstName(),
-            'last_name' => fake()->lastName(),
-            'grade_level' => 'Grade 6',
-            'section' => 'St. Therese',
-            'parent_id' => User::factory()->parent(),
-            'current_balance' => 500.00,
-            'daily_spending_limit' => 200.00,
-            'is_spending_limited' => true,
-            'status' => 'active',
-        ];
-    }
-
-    /**
-     * Indicate that the student account card is lost.
-     */
-    public function lostCard(): static
-    {
-        return $this->state(fn () => [
-            'status' => 'lost_card',
-        ]);
-    }
-
-    /**
-     * Indicate that the student account is suspended.
-     */
-    public function suspended(): static
-    {
-        return $this->state(fn () => [
-            'status' => 'suspended',
-        ]);
-    }
-
-    /**
-     * Indicate that the student account is inactive.
-     */
-    public function inactive(): static
-    {
-        return $this->state(fn () => [
-            'status' => 'inactive',
-        ]);
-    }
-
-    /**
-     * Indicate that the student account has no spending limit.
-     */
-    public function unlimited(): static
-    {
-        return $this->state(fn () => [
-            'is_spending_limited' => false,
-        ]);
-    }
+PosCheckoutController.url = (options?: RouteQueryOptions) => {
+    return PosCheckoutController.definition.url + queryParams(options)
 }
-</file>
 
-<file path="tests/Feature/POS/CheckoutTest.php">
-<?php
-
-use App\Models\InventoryLog;
-use App\Models\Product;
-use App\Models\StudentAccount;
-use App\Models\Transaction;
-use App\Models\TransactionDetail;
-use App\Models\User;
-use Database\Seeders\RolesAndPermissionsSeeder;
-
-beforeEach(function () {
-    $this->seed(RolesAndPermissionsSeeder::class);
-});
-
-it('processes a valid cashless transaction and deducts balance', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->create([
-        'current_balance' => 500.00,
-        'daily_spending_limit' => 200.00,
-        'is_spending_limited' => true,
-        'status' => 'active',
-    ]);
-    $product = Product::factory()->create([
-        'price' => 50.00,
-        'stock_quantity' => 10,
-    ]);
-
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 100.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 2,
-                'unit_price' => 50.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(201)
-        ->assertJsonPath('message', 'Checkout completed successfully.')
-        ->assertJsonPath('receipt.total_amount', 100)
-        ->assertJsonPath('receipt.payment_method', 'cashless')
-        ->assertJsonPath('receipt.student.remaining_balance', 400);
-
-    expect($student->fresh()->current_balance)->toBe('400.00')
-        ->and($product->fresh()->stock_quantity)->toBe(8);
-
-    $this->assertDatabaseHas('transactions', [
-        'cashier_id' => $cashier->id,
-        'student_account_id' => $student->id,
-        'total_amount' => 100.00,
-        'payment_method' => 'cashless',
-        'amount_tendered' => 100.00,
-        'change_amount' => 0.00,
-        'status' => 'completed',
-    ]);
-
-    $this->assertDatabaseHas('transaction_details', [
-        'product_id' => $product->id,
-        'quantity' => 2,
-        'unit_price' => 50.00,
-        'subtotal' => 100.00,
-    ]);
-});
-
-it('blocks cashless transaction if rfid card is marked as lost_card', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->lostCard()->create([
-        'current_balance' => 500.00,
-        'daily_spending_limit' => 200.00,
-    ]);
-    $product = Product::factory()->create([
-        'price' => 50.00,
-        'stock_quantity' => 10,
-    ]);
-
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 50.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'unit_price' => 50.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(403);
-
-    expect($student->fresh()->current_balance)->toBe('500.00')
-        ->and($product->fresh()->stock_quantity)->toBe(10)
-        ->and(Transaction::count())->toBe(0);
-});
-
-it('blocks cashless transaction if balance is insufficient', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->create([
-        'current_balance' => 30.00,
-        'daily_spending_limit' => 200.00,
-        'status' => 'active',
-    ]);
-    $product = Product::factory()->create([
-        'price' => 50.00,
-        'stock_quantity' => 10,
-    ]);
-
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 50.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'unit_price' => 50.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(403);
-
-    expect($student->fresh()->current_balance)->toBe('30.00')
-        ->and($product->fresh()->stock_quantity)->toBe(10)
-        ->and(Transaction::count())->toBe(0);
-});
-
-it('blocks cashless transaction if daily spending limit is exceeded', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->create([
-        'current_balance' => 500.00,
-        'daily_spending_limit' => 100.00,
-        'is_spending_limited' => true,
-        'status' => 'active',
-    ]);
-
-    // Create prior transaction of 80.00 today
-    Transaction::factory()->create([
-        'cashier_id' => $cashier->id,
-        'student_account_id' => $student->id,
-        'total_amount' => 80.00,
-        'payment_method' => 'cashless',
-        'status' => 'completed',
-        'created_at' => now(),
-    ]);
-
-    $product = Product::factory()->create([
-        'price' => 30.00,
-        'stock_quantity' => 10,
-    ]);
-
-    // 80.00 + 30.00 = 110.00, which exceeds 100.00 daily limit
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 30.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'unit_price' => 30.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(403);
-
-    expect($student->fresh()->current_balance)->toBe('500.00')
-        ->and($product->fresh()->stock_quantity)->toBe(10)
-        ->and(Transaction::count())->toBe(1);
-});
-
-it('decrements product stock and generates an inventory log on successful sale', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->create([
-        'current_balance' => 300.00,
-        'daily_spending_limit' => 300.00,
-        'is_spending_limited' => true,
-        'status' => 'active',
-    ]);
-    $product = Product::factory()->create([
-        'price' => 20.00,
-        'stock_quantity' => 25,
-    ]);
-
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 60.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 3,
-                'unit_price' => 20.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(201);
-
-    expect($product->fresh()->stock_quantity)->toBe(22);
-
-    $this->assertDatabaseHas('inventory_logs', [
-        'product_id' => $product->id,
-        'user_id' => $cashier->id,
-        'action' => 'sale',
-        'quantity_changed' => 3,
-        'previous_stock' => 25,
-        'new_stock' => 22,
-    ]);
-});
-
-it('rolls back the entire transaction if a product is out of stock', function () {
-    $cashier = User::factory()->cashier()->create();
-    $student = StudentAccount::factory()->create([
-        'current_balance' => 500.00,
-        'daily_spending_limit' => 500.00,
-        'is_spending_limited' => true,
-        'status' => 'active',
-    ]);
-    $productA = Product::factory()->create([
-        'price' => 20.00,
-        'stock_quantity' => 10,
-    ]);
-    $productB = Product::factory()->create([
-        'price' => 30.00,
-        'stock_quantity' => 2,
-    ]);
-
-    // Request 2 of Product A and 5 of Product B (Product B has only 2 in stock!)
-    $payload = [
-        'payment_method' => 'cashless',
-        'rfid_uid' => $student->rfid_uid,
-        'amount_tendered' => 190.00,
-        'items' => [
-            [
-                'product_id' => $productA->id,
-                'quantity' => 2,
-                'unit_price' => 20.00,
-            ],
-            [
-                'product_id' => $productB->id,
-                'quantity' => 5,
-                'unit_price' => 30.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(422);
-
-    // Verify atomic rollback across all affected entities
-    expect($productA->fresh()->stock_quantity)->toBe(10)
-        ->and($productB->fresh()->stock_quantity)->toBe(2)
-        ->and($student->fresh()->current_balance)->toBe('500.00')
-        ->and(Transaction::count())->toBe(0)
-        ->and(TransactionDetail::count())->toBe(0)
-        ->and(InventoryLog::count())->toBe(0);
-});
-
-it('processes a valid cash transaction and computes change', function () {
-    $cashier = User::factory()->cashier()->create();
-    $product = Product::factory()->create([
-        'price' => 45.00,
-        'stock_quantity' => 15,
-    ]);
-
-    $payload = [
-        'payment_method' => 'cash',
-        'amount_tendered' => 100.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 2,
-                'unit_price' => 45.00,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(201)
-        ->assertJsonPath('receipt.total_amount', 90)
-        ->assertJsonPath('receipt.amount_tendered', 100)
-        ->assertJsonPath('receipt.change_amount', 10);
-
-    expect($product->fresh()->stock_quantity)->toBe(13);
-
-    $this->assertDatabaseHas('transactions', [
-        'cashier_id' => $cashier->id,
-        'student_account_id' => null,
-        'total_amount' => 90.00,
-        'payment_method' => 'cash',
-        'amount_tendered' => 100.00,
-        'change_amount' => 10.00,
-        'status' => 'completed',
-    ]);
-});
-
-it('blocks unauthorized access for users without cashier or admin role', function () {
-    $parent = User::factory()->parent()->create();
-    $product = Product::factory()->create();
-
-    $payload = [
-        'payment_method' => 'cash',
-        'amount_tendered' => 100.00,
-        'items' => [
-            [
-                'product_id' => $product->id,
-                'quantity' => 1,
-                'unit_price' => (float) $product->price,
-            ],
-        ],
-    ];
-
-    $response = $this->actingAs($parent)->postJson(route('pos.checkout'), $payload);
-
-    $response->assertStatus(403);
-});
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+PosCheckoutController.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: PosCheckoutController.url(options),
+    method: 'post',
+})
+export default PosCheckoutController
 </file>
 
 <file path=".claude/skills/deploying-to-cloud/reference/checklists.md">
@@ -5091,6 +4445,223 @@ abstract class Controller
 }
 </file>
 
+<file path="app/Http/Controllers/PosCheckoutController.php">
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Requests\PosCheckoutRequest;
+use App\Models\InventoryLog;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+
+class PosCheckoutController extends Controller
+{
+    /**
+     * Handle the POS checkout transaction request.
+     */
+    public function __invoke(PosCheckoutRequest $request): JsonResponse|RedirectResponse
+    {
+        return DB::transaction(function () use ($request) {
+            $paymentMethod = $request->validated('payment_method');
+            $cartItems = $request->validated('items');
+            $amountTendered = (float) $request->validated('amount_tendered');
+            $cashierId = Auth::id();
+
+            // Step A: Product & Inventory Validation with Pessimistic Row Locking
+            $totalAmount = 0.00;
+            $processedItems = [];
+
+            // Aggregate quantities by product_id to validate against concurrent inventory
+            $requestedQuantities = [];
+            foreach ($cartItems as $item) {
+                $productId = $item['product_id'];
+                $requestedQuantities[$productId] = ($requestedQuantities[$productId] ?? 0) + (int) $item['quantity'];
+            }
+
+            foreach ($cartItems as $item) {
+                /** @var Product|null $product */
+                $product = Product::where('id', $item['product_id'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $product) {
+                    abort(422, "Product ID {$item['product_id']} does not exist.");
+                }
+
+                if ($product->stock_quantity < $requestedQuantities[$product->id]) {
+                    abort(422, "Insufficient stock for product: {$product->name}. Current stock: {$product->stock_quantity}.");
+                }
+
+                $quantity = (int) $item['quantity'];
+                $unitPrice = (float) $product->price;
+                $subtotal = round($unitPrice * $quantity, 2);
+                $totalAmount = round($totalAmount + $subtotal, 2);
+
+                $processedItems[] = [
+                    'product' => $product,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ];
+            }
+
+            // Step B: Student Account & RFID Validation (If Cashless)
+            $student = null;
+            $studentAccountId = null;
+            $changeAmount = 0.00;
+
+            if ($paymentMethod === 'cashless') {
+                $rfidUid = $request->validated('rfid_uid');
+
+                /** @var StudentAccount|null $student */
+                $student = StudentAccount::where('rfid_uid', $rfidUid)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $student) {
+                    abort(404, 'Student account not found for provided RFID.');
+                }
+
+                if (in_array($student->status, ['lost_card', 'suspended', 'inactive'], true)) {
+                    abort(403, "Student account is {$student->status}. Transaction blocked.");
+                }
+
+                // Enforce Daily Spending Limits
+                if ($student->is_spending_limited) {
+                    $spentToday = (float) Transaction::where('student_account_id', $student->id)
+                        ->where('status', 'completed')
+                        ->whereDate('created_at', today())
+                        ->sum('total_amount');
+
+                    if (round($spentToday + $totalAmount, 2) > (float) $student->daily_spending_limit) {
+                        abort(403, 'Daily transaction limit exceeded.');
+                    }
+                }
+
+                // Enforce Stored-Value Balance
+                if ((float) $student->current_balance < $totalAmount) {
+                    abort(403, 'Insufficient balance.');
+                }
+
+                // Deduct Balance
+                $student->decrement('current_balance', $totalAmount);
+
+                $studentAccountId = $student->id;
+                $amountTendered = $totalAmount;
+                $changeAmount = 0.00;
+            } else {
+                // Cash Payment Validation
+                if ($amountTendered < $totalAmount) {
+                    abort(422, 'Amount tendered is less than total payable amount.');
+                }
+
+                $changeAmount = round($amountTendered - $totalAmount, 2);
+            }
+
+            // Step C: Record the Master Transaction
+            $datePart = now()->format('Ymd');
+            $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
+            while (Transaction::where('receipt_number', $receiptNumber)->exists()) {
+                $receiptNumber = 'RCPT-'.$datePart.'-'.strtoupper(Str::random(4));
+            }
+
+            $transaction = Transaction::create([
+                'receipt_number' => $receiptNumber,
+                'cashier_id' => $cashierId,
+                'student_account_id' => $studentAccountId,
+                'total_amount' => $totalAmount,
+                'payment_method' => $paymentMethod,
+                'amount_tendered' => $amountTendered,
+                'change_amount' => $changeAmount,
+                'status' => 'completed',
+            ]);
+
+            // Step D: Itemize Receipt & Update Inventory
+            $receiptItems = [];
+            foreach ($processedItems as $itemData) {
+                /** @var Product $product */
+                $product = $itemData['product'];
+                $quantity = $itemData['quantity'];
+                $unitPrice = $itemData['unit_price'];
+                $subtotal = $itemData['subtotal'];
+
+                TransactionDetail::create([
+                    'transaction_id' => $transaction->id,
+                    'product_id' => $product->id,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ]);
+
+                $previousStock = $product->stock_quantity;
+                $product->decrement('stock_quantity', $quantity);
+                $newStock = $previousStock - $quantity;
+                $product->stock_quantity = $newStock;
+
+                InventoryLog::create([
+                    'product_id' => $product->id,
+                    'user_id' => $cashierId,
+                    'action' => 'sale',
+                    'quantity_changed' => $quantity,
+                    'previous_stock' => $previousStock,
+                    'new_stock' => $newStock,
+                    'remarks' => "POS Receipt #{$receiptNumber}",
+                ]);
+
+                $receiptItems[] = [
+                    'product_id' => $product->id,
+                    'name' => $product->name,
+                    'quantity' => $quantity,
+                    'unit_price' => $unitPrice,
+                    'subtotal' => $subtotal,
+                ];
+            }
+
+            // Step E: Response Data for Thermal Printer & Cash Drawer
+            $receiptData = [
+                'transaction_id' => $transaction->id,
+                'receipt_number' => $transaction->receipt_number,
+                'created_at' => $transaction->created_at->toDateTimeString(),
+                'cashier' => Auth::user()?->full_name ?? Auth::user()?->username,
+                'payment_method' => $paymentMethod,
+                'total_amount' => $totalAmount,
+                'amount_tendered' => $amountTendered,
+                'change_amount' => $changeAmount,
+                'student' => $student ? [
+                    'id' => $student->id,
+                    'name' => "{$student->first_name} {$student->last_name}",
+                    'student_id_number' => $student->student_id_number,
+                    'remaining_balance' => (float) $student->current_balance,
+                ] : null,
+                'items' => $receiptItems,
+            ];
+
+            if ($request->wantsJson() && ! $request->header('X-Inertia')) {
+                return response()->json([
+                    'message' => 'Checkout completed successfully.',
+                    'transaction_id' => $transaction->id,
+                    'receipt' => $receiptData,
+                ], 201);
+            }
+
+            return redirect()->route('pos.index')->with([
+                'success' => 'Checkout completed successfully.',
+                'transaction_id' => $transaction->id,
+                'receipt' => $receiptData,
+            ]);
+        });
+    }
+}
+</file>
+
 <file path="app/Http/Middleware/EnsureUserIsActive.php">
 <?php
 
@@ -5122,6 +4693,60 @@ class EnsureUserIsActive
         }
 
         return $next($request);
+    }
+}
+</file>
+
+<file path="app/Http/Requests/PosCheckoutRequest.php">
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
+
+class PosCheckoutRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {
+        return [
+            'payment_method' => ['required', 'string', 'in:cash,cashless'],
+            'rfid_uid' => ['required_if:payment_method,cashless', 'nullable', 'string'],
+            'amount_tendered' => ['required', 'numeric', 'min:0'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
+            'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+        ];
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'rfid_uid.required_if' => 'The RFID UID is required for cashless payment transactions.',
+            'items.required' => 'The cart must contain at least one item.',
+            'items.min' => 'The cart must contain at least one item.',
+            'items.*.product_id.exists' => 'One or more selected products do not exist in the inventory.',
+            'items.*.quantity.min' => 'Item quantity must be at least 1.',
+        ];
     }
 }
 </file>
@@ -7026,6 +6651,84 @@ class ProductFactory extends Factory
 }
 </file>
 
+<file path="database/factories/StudentAccountFactory.php">
+<?php
+
+namespace Database\Factories;
+
+use App\Models\StudentAccount;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+/**
+ * @extends Factory<StudentAccount>
+ */
+class StudentAccountFactory extends Factory
+{
+    /**
+     * Define the model's default state.
+     *
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+            'student_id_number' => fake()->unique()->numerify('2026-####'),
+            'rfid_uid' => fake()->unique()->regexify('[A-F0-9]{14}'),
+            'first_name' => fake()->firstName(),
+            'last_name' => fake()->lastName(),
+            'grade_level' => 'Grade 6',
+            'section' => 'St. Therese',
+            'parent_id' => User::factory()->parent(),
+            'current_balance' => 500.00,
+            'daily_spending_limit' => 200.00,
+            'is_spending_limited' => true,
+            'status' => 'active',
+        ];
+    }
+
+    /**
+     * Indicate that the student account card is lost.
+     */
+    public function lostCard(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'lost_card',
+        ]);
+    }
+
+    /**
+     * Indicate that the student account is suspended.
+     */
+    public function suspended(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'suspended',
+        ]);
+    }
+
+    /**
+     * Indicate that the student account is inactive.
+     */
+    public function inactive(): static
+    {
+        return $this->state(fn () => [
+            'status' => 'inactive',
+        ]);
+    }
+
+    /**
+     * Indicate that the student account has no spending limit.
+     */
+    public function unlimited(): static
+    {
+        return $this->state(fn () => [
+            'is_spending_limited' => false,
+        ]);
+    }
+}
+</file>
+
 <file path="database/factories/TransactionDetailFactory.php">
 <?php
 
@@ -8177,10 +7880,12 @@ export default VerifyEmailController
 </file>
 
 <file path="resources/js/actions/App/Http/Controllers/index.ts">
+import PosCheckoutController from './PosCheckoutController'
 import ProfileController from './ProfileController'
 import Auth from './Auth'
 const Controllers = {
-    ProfileController: Object.assign(ProfileController, ProfileController),
+    PosCheckoutController: Object.assign(PosCheckoutController, PosCheckoutController),
+ProfileController: Object.assign(ProfileController, ProfileController),
 Auth: Object.assign(Auth, Auth),
 }
 
@@ -9826,19 +9531,47 @@ export function useBarcodeScanner(onScan: (barcode: string) => void) {
 import { useState, useMemo } from 'react';
 
 export interface CartItem {
-  product: any;
+  product: {
+    id: number;
+    name?: string;
+    price: number;
+    image?: string;
+    category?: string;
+    stock_quantity?: number;
+    [key: string]: any;
+  };
   quantity: number;
+}
+
+export interface CheckoutCartItemPayload {
+  product_id: number;
+  quantity: number;
+  unit_price: number;
+}
+
+/**
+ * Format cart items into the shape strictly required by PosCheckoutRequest
+ * (product_id, quantity, unit_price).
+ */
+export function formatCartForCheckout(
+  cartItems: Array<{ product: { id: number | string; price: number | string }; quantity: number }>
+): CheckoutCartItemPayload[] {
+  return cartItems.map((item) => ({
+    product_id: Number(item.product.id),
+    quantity: Number(item.quantity),
+    unit_price: Number(item.product.price),
+  }));
 }
 
 export function usePOSCart(dailyLimit?: number) {
   const [items, setItems] = useState<CartItem[]>([]);
 
   const addItem = (product: any, quantity: number = 1) => {
-    setItems(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
+    setItems((prev) => {
+      const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
-        return prev.map(item => 
-          item.product.id === product.id 
+        return prev.map((item) =>
+          item.product.id === product.id
             ? { ...item, quantity: item.quantity + quantity }
             : item
         );
@@ -9848,24 +9581,30 @@ export function usePOSCart(dailyLimit?: number) {
   };
 
   const updateQuantity = (productId: number, quantity: number) => {
-    setItems(prev => prev.map(item => 
-      item.product.id === productId ? { ...item, quantity } : item
-    ));
+    setItems((prev) =>
+      prev.map((item) =>
+        item.product.id === productId ? { ...item, quantity } : item
+      )
+    );
   };
 
   const removeItem = (productId: number) => {
-    setItems(prev => prev.filter(item => item.product.id !== productId));
+    setItems((prev) => prev.filter((item) => item.product.id !== productId));
   };
 
   const clearCart = () => setItems([]);
 
   const subtotal = useMemo(() => {
-    return items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+    return items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   }, [items]);
 
   const exceedsLimit = useMemo(() => {
     return dailyLimit ? subtotal > dailyLimit : false;
   }, [subtotal, dailyLimit]);
+
+  const getCheckoutItems = (): CheckoutCartItemPayload[] => {
+    return formatCartForCheckout(items);
+  };
 
   return {
     items,
@@ -9874,7 +9613,9 @@ export function usePOSCart(dailyLimit?: number) {
     removeItem,
     clearCart,
     subtotal,
-    exceedsLimit
+    exceedsLimit,
+    getCheckoutItems,
+    formatForCheckout: getCheckoutItems,
   };
 }
 </file>
@@ -11510,7 +11251,7 @@ export default function ActiveCart({
 </file>
 
 <file path="resources/js/Pages/POS/Partials/CheckoutModal.tsx">
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11523,15 +11264,30 @@ import { Button } from "@/Components/ui/button";
 import { Input } from "@/Components/ui/input";
 import { Badge } from "@/Components/ui/badge";
 import { formatMoney } from '@/lib/formatters';
-import { CreditCard, Banknote, QrCode, CheckCircle2, User, Printer } from 'lucide-react';
-import { StudentCustomer } from './ActiveCart';
+import {
+  CreditCard,
+  Banknote,
+  QrCode,
+  CheckCircle2,
+  User,
+  Printer,
+  AlertTriangle,
+  Radio,
+  Loader2,
+  Check,
+} from 'lucide-react';
+import { StudentCustomer, CartItem } from './ActiveCart';
+import { formatCartForCheckout } from '@/Hooks/usePOSCart';
+import { checkout } from '@/routes/pos';
+import axios from 'axios';
 
 interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   totalAmount: number;
   selectedCustomer: StudentCustomer | null;
-  onSuccess: () => void;
+  cartItems?: CartItem[];
+  onSuccess: (receipt?: any) => void;
 }
 
 export default function CheckoutModal({
@@ -11539,23 +11295,144 @@ export default function CheckoutModal({
   onClose,
   totalAmount,
   selectedCustomer,
+  cartItems = [],
   onSuccess,
 }: CheckoutModalProps) {
   const [paymentMethod, setPaymentMethod] = useState<'rfid' | 'cash' | 'qr'>('cash');
   const [cashTendered, setCashTendered] = useState<number>(totalAmount);
-  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [rfidUid, setRfidUid] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successReceipt, setSuccessReceipt] = useState<any | null>(null);
+  const [scanPulse, setScanPulse] = useState<boolean>(false);
 
   // Quick cash denominations in Philippine Peso
   const denominations = [50, 100, 200, 500, 1000];
   const change = Math.max(0, cashTendered - totalAmount);
 
-  const handleProcess = () => {
-    setIsCompleted(true);
-    setTimeout(() => {
-      setIsCompleted(false);
-      onSuccess();
-      onClose();
-    }, 1200);
+  // Synchronize initial state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCashTendered(totalAmount);
+      setErrorMessage(null);
+      setSuccessReceipt(null);
+      setIsSubmitting(false);
+    } else {
+      setRfidUid('');
+      setErrorMessage(null);
+      setSuccessReceipt(null);
+      setIsSubmitting(false);
+    }
+  }, [isOpen, totalAmount]);
+
+  // RFID Scanner Event Listener (USB Hardware Keyboard Emulator)
+  useEffect(() => {
+    if (!isOpen || paymentMethod !== 'rfid' || successReceipt) return;
+
+    let buffer = '';
+    let lastTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isManualRfid = target?.getAttribute('data-manual-rfid') === 'true';
+
+      // If cashier is typing manually in the designated RFID field, skip global key capture
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName) && isManualRfid) {
+        return;
+      }
+
+      const now = Date.now();
+      // Hardware scanner sends keys rapidly (< 120ms intervals)
+      if (now - lastTime > 150) {
+        buffer = '';
+      }
+      lastTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          const scanned = buffer.trim();
+          setRfidUid(scanned);
+          setErrorMessage(null);
+          setScanPulse(true);
+          setTimeout(() => setScanPulse(false), 1500);
+          buffer = '';
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, paymentMethod, successReceipt]);
+
+  // Handle Checkout Submission
+  const handleProcess = async () => {
+    if (isSubmitting) return;
+    setErrorMessage(null);
+
+    // Cash Tender Validation
+    if (paymentMethod === 'cash' && cashTendered < totalAmount) {
+      setErrorMessage('Amount tendered is less than the total payable amount.');
+      return;
+    }
+
+    // Cashless RFID Validation
+    if (paymentMethod === 'rfid' && !rfidUid.trim()) {
+      setErrorMessage('Please tap or enter a student RFID card before confirming checkout.');
+      return;
+    }
+
+    if (!cartItems || cartItems.length === 0) {
+      setErrorMessage('Cart is empty. Add products before proceeding.');
+      return;
+    }
+
+    const formattedItems = formatCartForCheckout(cartItems);
+    if (formattedItems.length === 0) {
+      setErrorMessage('No valid cart items to checkout.');
+      return;
+    }
+
+    const payload = {
+      payment_method: paymentMethod === 'rfid' ? 'cashless' : 'cash',
+      rfid_uid: paymentMethod === 'rfid' ? rfidUid.trim() : null,
+      amount_tendered: paymentMethod === 'rfid' ? totalAmount : cashTendered,
+      items: formattedItems,
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      const endpoint = checkout.url();
+      const response = await axios.post(endpoint, payload, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (response.status === 201 || response.status === 200) {
+        const receipt = response.data?.receipt;
+        setSuccessReceipt(receipt);
+        onSuccess(receipt);
+      }
+    } catch (err: any) {
+      let message = 'Transaction could not be processed. Please try again.';
+      if (err.response?.data?.message) {
+        message = err.response.data.message;
+      } else if (err.response?.data?.errors) {
+        const firstKey = Object.keys(err.response.data.errors)[0];
+        message = err.response.data.errors[firstKey][0];
+      } else if (err.message) {
+        message = err.message;
+      }
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -11579,7 +11456,7 @@ export default function CheckoutModal({
               Settle Order Payment
             </DialogTitle>
             <DialogDescription className="text-amber-100/80 text-xs">
-              Select student account, cash tender, or digital payment.
+              Select cash payment or tap student RFID card to debit balance.
             </DialogDescription>
           </DialogHeader>
 
@@ -11593,18 +11470,73 @@ export default function CheckoutModal({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-5">
-          {isCompleted ? (
-            <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
+        <div className="p-6 space-y-4">
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="p-3.5 bg-red-50 border border-red-200/80 rounded-xl flex items-start gap-2.5 text-red-900 animate-in fade-in duration-200">
+              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-0.5">
+                <span className="font-bold block">Payment Blocked</span>
+                <p className="text-red-700">{errorMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {successReceipt ? (
+            /* Success Receipt Display */
+            <div className="py-4 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-200">
               <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center animate-bounce">
                 <CheckCircle2 size={36} />
               </div>
-              <h4 className="font-extrabold text-slate-800 text-lg">Transaction Complete!</h4>
-              <p className="text-xs text-slate-500">Printing official canteen receipt...</p>
+              <div className="space-y-0.5">
+                <h4 className="font-extrabold text-slate-800 text-lg">Transaction Complete!</h4>
+                <p className="text-xs text-slate-500">Official canteen receipt registered.</p>
+              </div>
+
+              {/* Receipt Summary Card */}
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Receipt Number:</span>
+                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    {successReceipt.receipt_number}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Payment Mode:</span>
+                  <span className="uppercase font-bold text-[#5c1516]">{successReceipt.payment_method}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Total Paid:</span>
+                  <span className="font-bold text-slate-900">{formatMoney(successReceipt.total_amount)}</span>
+                </div>
+                {successReceipt.student && (
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 font-semibold">Remaining Balance:</span>
+                    <span className="font-bold text-emerald-700">
+                      {formatMoney(successReceipt.student.remaining_balance)}
+                    </span>
+                  </div>
+                )}
+                {successReceipt.change_amount > 0 && (
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 font-semibold">Change Returned:</span>
+                    <span className="font-bold text-emerald-700">
+                      {formatMoney(successReceipt.change_amount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                onClick={onClose}
+                className="w-full bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 rounded-xl shadow-md"
+              >
+                Close & Return to POS
+              </Button>
             </div>
           ) : (
             <>
-              {/* Payment Methods Tabs */}
+              {/* Payment Methods Selector */}
               <div>
                 <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wider">
                   Payment Method
@@ -11612,7 +11544,11 @@ export default function CheckoutModal({
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('cash')}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('cash');
+                      setErrorMessage(null);
+                    }}
                     className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
                       paymentMethod === 'cash'
                         ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
@@ -11625,7 +11561,11 @@ export default function CheckoutModal({
 
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('rfid')}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('rfid');
+                      setErrorMessage(null);
+                    }}
                     className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
                       paymentMethod === 'rfid'
                         ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
@@ -11638,7 +11578,11 @@ export default function CheckoutModal({
 
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('qr')}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('qr');
+                      setErrorMessage(null);
+                    }}
                     className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
                       paymentMethod === 'qr'
                         ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
@@ -11658,35 +11602,43 @@ export default function CheckoutModal({
                     <span>Cash Received:</span>
                     <Input
                       type="number"
+                      disabled={isSubmitting}
                       value={cashTendered}
-                      onChange={(e) => setCashTendered(Number(e.target.value))}
+                      onChange={(e) => {
+                        setCashTendered(Number(e.target.value));
+                        if (errorMessage) setErrorMessage(null);
+                      }}
                       className="w-32 h-9 text-right font-bold text-base bg-white"
                     />
                   </div>
 
-                  {/* Fast Denomination Pills */}
+                  {/* Fast Denomination Buttons */}
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
+                      disabled={isSubmitting}
                       onClick={() => setCashTendered(totalAmount)}
                       className="h-7 text-[11px] font-semibold bg-white border-slate-200"
                     >
                       Exact (₱{totalAmount})
                     </Button>
-                    {denominations.filter(d => d >= totalAmount).map((d) => (
-                      <Button
-                        key={d}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCashTendered(d)}
-                        className="h-7 text-[11px] font-semibold bg-white border-slate-200"
-                      >
-                        ₱{d}
-                      </Button>
-                    ))}
+                    {denominations
+                      .filter((d) => d >= totalAmount)
+                      .map((d) => (
+                        <Button
+                          key={d}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isSubmitting}
+                          onClick={() => setCashTendered(d)}
+                          className="h-7 text-[11px] font-semibold bg-white border-slate-200"
+                        >
+                          ₱{d}
+                        </Button>
+                      ))}
                   </div>
 
                   {/* Change Computation */}
@@ -11700,18 +11652,77 @@ export default function CheckoutModal({
               )}
 
               {paymentMethod === 'rfid' && (
-                <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl flex flex-col items-center text-center space-y-2">
-                  <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center animate-pulse">
-                    <CreditCard size={22} />
+                <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-3">
+                  <div className="flex flex-col items-center text-center space-y-1.5">
+                    <div
+                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                        rfidUid
+                          ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500'
+                          : scanPulse
+                          ? 'bg-amber-200 text-amber-900 ring-4 ring-amber-300'
+                          : 'bg-amber-100 text-amber-800 animate-pulse'
+                      }`}
+                    >
+                      {rfidUid ? <Check size={22} /> : <CreditCard size={22} />}
+                    </div>
+
+                    <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                      {rfidUid ? (
+                        <>
+                          <span className="text-emerald-700">Card Captured</span>
+                        </>
+                      ) : (
+                        <>
+                          <Radio size={14} className="animate-spin text-amber-600" />
+                          <span>Tap RFID Card to Terminal Reader</span>
+                        </>
+                      )}
+                    </h5>
+
+                    <p className="text-[11px] text-slate-500 max-w-xs">
+                      {selectedCustomer
+                        ? `Account: ${selectedCustomer.name} (Balance: ${formatMoney(selectedCustomer.balance)})`
+                        : 'Scanner acts automatically as keyboard input.'}
+                    </p>
                   </div>
-                  <h5 className="font-bold text-xs text-slate-800">
-                    {selectedCustomer ? `Charge to ${selectedCustomer.name}` : 'Tap Student ID Card to Scanner'}
-                  </h5>
-                  <p className="text-[11px] text-slate-500 max-w-xs">
-                    {selectedCustomer 
-                      ? `Available balance: ${formatMoney(selectedCustomer.balance)}. Remaining after checkout: ${formatMoney(selectedCustomer.balance - totalAmount)}.`
-                      : 'Place RFID card on terminal reader to authenticate student account.'}
-                  </p>
+
+                  {/* RFID Input Field (Keyboard Scanner or Manual Entry) */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        data-manual-rfid="true"
+                        type="text"
+                        placeholder="Waiting for RFID tap or enter UID..."
+                        value={rfidUid}
+                        disabled={isSubmitting}
+                        onChange={(e) => {
+                          setRfidUid(e.target.value);
+                          if (errorMessage) setErrorMessage(null);
+                        }}
+                        className={`font-mono text-center font-bold tracking-wider text-xs h-9 bg-white transition-all ${
+                          rfidUid ? 'border-emerald-500 ring-1 ring-emerald-500' : ''
+                        }`}
+                      />
+                      {rfidUid && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isSubmitting}
+                          onClick={() => setRfidUid('')}
+                          className="h-9 px-2 text-[11px] text-slate-400 hover:text-slate-600"
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    {rfidUid && (
+                      <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                        <CheckCircle2 size={12} />
+                        <span>Ready to deduct {formatMoney(totalAmount)} from card</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -11720,9 +11731,9 @@ export default function CheckoutModal({
                   <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
                     <QrCode size={22} />
                   </div>
-                  <h5 className="font-bold text-xs text-slate-800">Display QR on Customer Pole Display</h5>
+                  <h5 className="font-bold text-xs text-slate-800">GCash / Maya Dynamic QR</h5>
                   <p className="text-[11px] text-slate-500">
-                    Dynamic QR code generated for GCash / Maya payment.
+                    Digital QR gateway integration is in progress. Please use Cash or Student RFID.
                   </p>
                 </div>
               )}
@@ -11731,18 +11742,38 @@ export default function CheckoutModal({
         </div>
 
         {/* Footer */}
-        {!isCompleted && (
+        {!successReceipt && (
           <DialogFooter className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between sm:justify-between gap-3">
-            <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-500 text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={onClose}
+              className="text-slate-500 text-xs"
+            >
               Back to Cart
             </Button>
             <Button
               onClick={handleProcess}
-              disabled={paymentMethod === 'cash' && cashTendered < totalAmount}
-              className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-md flex items-center gap-2"
+              disabled={
+                isSubmitting ||
+                (paymentMethod === 'cash' && cashTendered < totalAmount) ||
+                (paymentMethod === 'rfid' && !rfidUid.trim()) ||
+                paymentMethod === 'qr'
+              }
+              className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50"
             >
-              <Printer size={15} />
-              Confirm & Print Receipt
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Printer size={15} />
+                  Confirm & Print Receipt
+                </>
+              )}
             </Button>
           </DialogFooter>
         )}
@@ -12234,6 +12265,7 @@ export default function POSIndex() {
         onClose={() => setIsCheckoutModalOpen(false)}
         totalAmount={totalPayable}
         selectedCustomer={selectedCustomer}
+        cartItems={cartItems}
         onSuccess={() => setCartItems([])}
       />
 
@@ -13694,6 +13726,342 @@ test('authenticated active user who becomes inactive is blocked by middleware', 
 });
 </file>
 
+<file path="tests/Feature/POS/CheckoutTest.php">
+<?php
+
+use App\Models\InventoryLog;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
+use App\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
+
+beforeEach(function () {
+    $this->seed(RolesAndPermissionsSeeder::class);
+});
+
+it('processes a valid cashless transaction and deducts balance', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 200.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('message', 'Checkout completed successfully.')
+        ->assertJsonPath('receipt.total_amount', 100)
+        ->assertJsonPath('receipt.payment_method', 'cashless')
+        ->assertJsonPath('receipt.student.remaining_balance', 400);
+
+    expect($student->fresh()->current_balance)->toBe('400.00')
+        ->and($product->fresh()->stock_quantity)->toBe(8);
+
+    $this->assertDatabaseHas('transactions', [
+        'cashier_id' => $cashier->id,
+        'student_account_id' => $student->id,
+        'total_amount' => 100.00,
+        'payment_method' => 'cashless',
+        'amount_tendered' => 100.00,
+        'change_amount' => 0.00,
+        'status' => 'completed',
+    ]);
+
+    $this->assertDatabaseHas('transaction_details', [
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'unit_price' => 50.00,
+        'subtotal' => 100.00,
+    ]);
+});
+
+it('blocks cashless transaction if rfid card is marked as lost_card', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->lostCard()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 200.00,
+    ]);
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 50.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('500.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(0);
+});
+
+it('blocks cashless transaction if balance is insufficient', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 30.00,
+        'daily_spending_limit' => 200.00,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 50.00,
+        'stock_quantity' => 10,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 50.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 50.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('30.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(0);
+});
+
+it('blocks cashless transaction if daily spending limit is exceeded', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 100.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+
+    // Create prior transaction of 80.00 today
+    Transaction::factory()->create([
+        'cashier_id' => $cashier->id,
+        'student_account_id' => $student->id,
+        'total_amount' => 80.00,
+        'payment_method' => 'cashless',
+        'status' => 'completed',
+        'created_at' => now(),
+    ]);
+
+    $product = Product::factory()->create([
+        'price' => 30.00,
+        'stock_quantity' => 10,
+    ]);
+
+    // 80.00 + 30.00 = 110.00, which exceeds 100.00 daily limit
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 30.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => 30.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+
+    expect($student->fresh()->current_balance)->toBe('500.00')
+        ->and($product->fresh()->stock_quantity)->toBe(10)
+        ->and(Transaction::count())->toBe(1);
+});
+
+it('decrements product stock and generates an inventory log on successful sale', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 300.00,
+        'daily_spending_limit' => 300.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $product = Product::factory()->create([
+        'price' => 20.00,
+        'stock_quantity' => 25,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 60.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 3,
+                'unit_price' => 20.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201);
+
+    expect($product->fresh()->stock_quantity)->toBe(22);
+
+    $this->assertDatabaseHas('inventory_logs', [
+        'product_id' => $product->id,
+        'user_id' => $cashier->id,
+        'action' => 'sale',
+        'quantity_changed' => 3,
+        'previous_stock' => 25,
+        'new_stock' => 22,
+    ]);
+});
+
+it('rolls back the entire transaction if a product is out of stock', function () {
+    $cashier = User::factory()->cashier()->create();
+    $student = StudentAccount::factory()->create([
+        'current_balance' => 500.00,
+        'daily_spending_limit' => 500.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+    $productA = Product::factory()->create([
+        'price' => 20.00,
+        'stock_quantity' => 10,
+    ]);
+    $productB = Product::factory()->create([
+        'price' => 30.00,
+        'stock_quantity' => 2,
+    ]);
+
+    // Request 2 of Product A and 5 of Product B (Product B has only 2 in stock!)
+    $payload = [
+        'payment_method' => 'cashless',
+        'rfid_uid' => $student->rfid_uid,
+        'amount_tendered' => 190.00,
+        'items' => [
+            [
+                'product_id' => $productA->id,
+                'quantity' => 2,
+                'unit_price' => 20.00,
+            ],
+            [
+                'product_id' => $productB->id,
+                'quantity' => 5,
+                'unit_price' => 30.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(422);
+
+    // Verify atomic rollback across all affected entities
+    expect($productA->fresh()->stock_quantity)->toBe(10)
+        ->and($productB->fresh()->stock_quantity)->toBe(2)
+        ->and($student->fresh()->current_balance)->toBe('500.00')
+        ->and(Transaction::count())->toBe(0)
+        ->and(TransactionDetail::count())->toBe(0)
+        ->and(InventoryLog::count())->toBe(0);
+});
+
+it('processes a valid cash transaction and computes change', function () {
+    $cashier = User::factory()->cashier()->create();
+    $product = Product::factory()->create([
+        'price' => 45.00,
+        'stock_quantity' => 15,
+    ]);
+
+    $payload = [
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'unit_price' => 45.00,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(201)
+        ->assertJsonPath('receipt.total_amount', 90)
+        ->assertJsonPath('receipt.amount_tendered', 100)
+        ->assertJsonPath('receipt.change_amount', 10);
+
+    expect($product->fresh()->stock_quantity)->toBe(13);
+
+    $this->assertDatabaseHas('transactions', [
+        'cashier_id' => $cashier->id,
+        'student_account_id' => null,
+        'total_amount' => 90.00,
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'change_amount' => 10.00,
+        'status' => 'completed',
+    ]);
+});
+
+it('blocks unauthorized access for users without cashier or admin role', function () {
+    $parent = User::factory()->parent()->create();
+    $product = Product::factory()->create();
+
+    $payload = [
+        'payment_method' => 'cash',
+        'amount_tendered' => 100.00,
+        'items' => [
+            [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'unit_price' => (float) $product->price,
+            ],
+        ],
+    ];
+
+    $response = $this->actingAs($parent)->postJson(route('pos.checkout'), $payload);
+
+    $response->assertStatus(403);
+});
+</file>
+
 <file path="tests/Unit/ExampleTest.php">
 <?php
 
@@ -14665,53 +15033,6 @@ class Product extends Model implements Auditable
 }
 </file>
 
-<file path="app/Models/StudentAccount.php">
-<?php
-
-namespace App\Models;
-
-use Database\Factories\StudentAccountFactory;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use OwenIt\Auditing\Contracts\Auditable;
-
-class StudentAccount extends Model implements Auditable
-{
-    /** @use HasFactory<StudentAccountFactory> */
-    use HasFactory, \OwenIt\Auditing\Auditable, SoftDeletes;
-
-    protected $fillable = [
-        'student_id_number', 'rfid_uid', 'first_name', 'last_name',
-        'grade_level', 'section', 'parent_id', 'current_balance',
-        'daily_spending_limit', 'is_spending_limited', 'status',
-    ];
-
-    /**
-     * @return array<string, string>
-     */
-    protected function casts(): array
-    {
-        return [
-            'current_balance' => 'decimal:2',
-            'daily_spending_limit' => 'decimal:2',
-            'is_spending_limited' => 'boolean',
-        ];
-    }
-
-    // Connects back to the User model (Parent Dashboard)
-    public function parent()
-    {
-        return $this->belongsTo(User::class, 'parent_id');
-    }
-
-    public function transactions()
-    {
-        return $this->hasMany(Transaction::class);
-    }
-}
-</file>
-
 <file path="app/Models/Transaction.php">
 <?php
 
@@ -15490,7 +15811,7 @@ export default RegisteredUserController
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -15505,7 +15826,7 @@ edit.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.url = (options?: RouteQueryOptions) => {
@@ -15514,7 +15835,7 @@ edit.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -15523,7 +15844,7 @@ edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -15533,7 +15854,7 @@ edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
@@ -15548,7 +15869,7 @@ update.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 update.url = (options?: RouteQueryOptions) => {
@@ -15557,7 +15878,7 @@ update.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
@@ -15567,7 +15888,7 @@ update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
@@ -15582,7 +15903,7 @@ destroy.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 destroy.url = (options?: RouteQueryOptions) => {
@@ -15591,7 +15912,7 @@ destroy.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
@@ -18503,7 +18824,7 @@ export default function UpdateProfileInformation({
 <file path="resources/js/routes/admin/audit-logs/index.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:63
+ * @see routes/web.php:66
  * @route '/admin/audit-logs'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18517,7 +18838,7 @@ index.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:63
+ * @see routes/web.php:66
  * @route '/admin/audit-logs'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -18525,7 +18846,7 @@ index.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:63
+ * @see routes/web.php:66
  * @route '/admin/audit-logs'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18533,7 +18854,7 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:63
+ * @see routes/web.php:66
  * @route '/admin/audit-logs'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18550,7 +18871,7 @@ export default auditLogs
 <file path="resources/js/routes/admin/products/index.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18564,7 +18885,7 @@ index.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -18572,7 +18893,7 @@ index.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18580,7 +18901,7 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:51
+ * @see routes/web.php:54
  * @route '/admin/products'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18589,7 +18910,7 @@ index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 })
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18603,7 +18924,7 @@ create.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.url = (options?: RouteQueryOptions) => {
@@ -18611,7 +18932,7 @@ create.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18619,7 +18940,7 @@ create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:55
+ * @see routes/web.php:58
  * @route '/admin/products/create'
  */
 create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18628,7 +18949,7 @@ create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 })
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18642,7 +18963,7 @@ edit.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.url = (options?: RouteQueryOptions) => {
@@ -18650,7 +18971,7 @@ edit.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18658,7 +18979,7 @@ edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:59
+ * @see routes/web.php:62
  * @route '/admin/products/edit'
  */
 edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18677,7 +18998,7 @@ export default products
 <file path="resources/js/routes/parent/index.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 /**
- * @see routes/web.php:40
+ * @see routes/web.php:43
  * @route '/parent/dashboard'
  */
 export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18691,7 +19012,7 @@ dashboard.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:40
+ * @see routes/web.php:43
  * @route '/parent/dashboard'
  */
 dashboard.url = (options?: RouteQueryOptions) => {
@@ -18699,7 +19020,7 @@ dashboard.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:40
+ * @see routes/web.php:43
  * @route '/parent/dashboard'
  */
 dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18707,7 +19028,7 @@ dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:40
+ * @see routes/web.php:43
  * @route '/parent/dashboard'
  */
 dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18724,7 +19045,7 @@ export default parent
 <file path="resources/js/routes/pos/index.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 /**
- * @see routes/web.php:33
+ * @see routes/web.php:34
  * @route '/pos'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18738,7 +19059,7 @@ index.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:33
+ * @see routes/web.php:34
  * @route '/pos'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -18746,7 +19067,7 @@ index.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:33
+ * @see routes/web.php:34
  * @route '/pos'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18754,15 +19075,50 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:33
+ * @see routes/web.php:34
  * @route '/pos'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
     url: index.url(options),
     method: 'head',
 })
+
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+export const checkout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: checkout.url(options),
+    method: 'post',
+})
+
+checkout.definition = {
+    methods: ["post"],
+    url: '/pos/checkout',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+checkout.url = (options?: RouteQueryOptions) => {
+    return checkout.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+checkout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: checkout.url(options),
+    method: 'post',
+})
 const pos = {
     index: Object.assign(index, index),
+checkout: Object.assign(checkout, checkout),
 }
 
 export default pos
@@ -18772,7 +19128,7 @@ export default pos
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18787,7 +19143,7 @@ edit.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.url = (options?: RouteQueryOptions) => {
@@ -18796,7 +19152,7 @@ edit.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -18805,7 +19161,7 @@ edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:19
+ * @see app/Http/Controllers/ProfileController.php:20
  * @route '/profile'
  */
 edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -18815,7 +19171,7 @@ edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
@@ -18830,7 +19186,7 @@ update.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 update.url = (options?: RouteQueryOptions) => {
@@ -18839,7 +19195,7 @@ update.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:30
+ * @see app/Http/Controllers/ProfileController.php:31
  * @route '/profile'
  */
 update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
@@ -18849,7 +19205,7 @@ update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
@@ -18864,7 +19220,7 @@ destroy.definition = {
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 destroy.url = (options?: RouteQueryOptions) => {
@@ -18873,7 +19229,7 @@ destroy.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:51
+ * @see app/Http/Controllers/ProfileController.php:52
  * @route '/profile'
  */
 destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
@@ -19494,6 +19850,53 @@ export default defineConfig({
         tailwindcss(),
     ],
 });
+</file>
+
+<file path="app/Models/StudentAccount.php">
+<?php
+
+namespace App\Models;
+
+use Database\Factories\StudentAccountFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use OwenIt\Auditing\Contracts\Auditable;
+
+class StudentAccount extends Model implements Auditable
+{
+    /** @use HasFactory<StudentAccountFactory> */
+    use HasFactory, \OwenIt\Auditing\Auditable, SoftDeletes;
+
+    protected $fillable = [
+        'student_id_number', 'rfid_uid', 'first_name', 'last_name',
+        'grade_level', 'section', 'parent_id', 'current_balance',
+        'daily_spending_limit', 'is_spending_limited', 'status',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'current_balance' => 'decimal:2',
+            'daily_spending_limit' => 'decimal:2',
+            'is_spending_limited' => 'boolean',
+        ];
+    }
+
+    // Connects back to the User model (Parent Dashboard)
+    public function parent()
+    {
+        return $this->belongsTo(User::class, 'parent_id');
+    }
+
+    public function transactions()
+    {
+        return $this->hasMany(Transaction::class);
+    }
+}
 </file>
 
 <file path="bootstrap/app.php">
@@ -20595,7 +20998,7 @@ export default function VerifyEmail({ status }: { status?: string }) {
 <file path="resources/js/routes/index.ts">
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../wayfinder'
 /**
- * @see routes/web.php:22
+ * @see routes/web.php:23
  * @route '/dashboard'
  */
 export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -20609,7 +21012,7 @@ dashboard.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:22
+ * @see routes/web.php:23
  * @route '/dashboard'
  */
 dashboard.url = (options?: RouteQueryOptions) => {
@@ -20617,7 +21020,7 @@ dashboard.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:22
+ * @see routes/web.php:23
  * @route '/dashboard'
  */
 dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -20625,7 +21028,7 @@ dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:22
+ * @see routes/web.php:23
  * @route '/dashboard'
  */
 dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -21264,87 +21667,6 @@ export default function Login({
 }
 </file>
 
-<file path="routes/web.php">
-<?php
-
-use App\Http\Controllers\PosCheckoutController;
-use App\Http\Controllers\ProfileController;
-use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
-
-// Root redirect based on role or to login
-Route::get('/', function () {
-    if (auth()->check()) {
-        return match (auth()->user()->role) {
-            'admin' => redirect()->route('admin.products.index'),
-            'cashier' => redirect()->route('pos.index'),
-            'parent' => redirect()->route('parent.dashboard'),
-            default => redirect()->route('dashboard'),
-        };
-    }
-
-    return redirect()->route('login');
-});
-
-// Central Dashboard redirector
-Route::get('/dashboard', function () {
-    return match (auth()->user()->role) {
-        'admin' => redirect()->route('admin.products.index'),
-        'cashier' => redirect()->route('pos.index'),
-        'parent' => redirect()->route('parent.dashboard'),
-        default => Inertia::render('Dashboard'),
-    };
-})->middleware(['auth', 'active'])->name('dashboard');
-
-// POS Portal - Cashier & Admin Access
-Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
-    Route::get('/', function () {
-        return Inertia::render('POS/Index');
-    })->name('index');
-
-    Route::post('/checkout', PosCheckoutController::class)->name('checkout');
-});
-
-// Parent Dashboard - Parent & Admin Access
-Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
-    Route::get('/parent/dashboard', function () {
-        return Inertia::render('ParentDashboard/Index');
-    })->name('parent.dashboard');
-});
-
-// Admin Panel Routes - Admin Access
-Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
-    Route::get('/', function () {
-        return redirect()->route('admin.products.index');
-    });
-
-    Route::get('/products', function () {
-        return Inertia::render('Admin/Products/Index');
-    })->name('products.index');
-
-    Route::get('/products/create', function () {
-        return Inertia::render('Admin/Products/Create');
-    })->name('products.create');
-
-    Route::get('/products/edit', function () {
-        return Inertia::render('Admin/Products/Edit');
-    })->name('products.edit');
-
-    Route::get('/audit-logs', function () {
-        return Inertia::render('Admin/AuditLogs/Index');
-    })->name('audit-logs.index');
-});
-
-// Profile Management
-Route::middleware(['auth', 'active'])->group(function () {
-    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-});
-
-require __DIR__.'/auth.php';
-</file>
-
 <file path="CLAUDE.md">
 <laravel-boost-guidelines>
 === foundation rules ===
@@ -21628,6 +21950,87 @@ Use Wayfinder to generate TypeScript functions for Laravel routes. Import from `
     "minimum-stability": "stable",
     "prefer-stable": true
 }
+</file>
+
+<file path="routes/web.php">
+<?php
+
+use App\Http\Controllers\PosCheckoutController;
+use App\Http\Controllers\ProfileController;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
+
+// Root redirect based on role or to login
+Route::get('/', function () {
+    if (auth()->check()) {
+        return match (auth()->user()->role) {
+            'admin' => redirect()->route('admin.products.index'),
+            'cashier' => redirect()->route('pos.index'),
+            'parent' => redirect()->route('parent.dashboard'),
+            default => redirect()->route('dashboard'),
+        };
+    }
+
+    return redirect()->route('login');
+});
+
+// Central Dashboard redirector
+Route::get('/dashboard', function () {
+    return match (auth()->user()->role) {
+        'admin' => redirect()->route('admin.products.index'),
+        'cashier' => redirect()->route('pos.index'),
+        'parent' => redirect()->route('parent.dashboard'),
+        default => Inertia::render('Dashboard'),
+    };
+})->middleware(['auth', 'active'])->name('dashboard');
+
+// POS Portal - Cashier & Admin Access
+Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
+    Route::get('/', function () {
+        return Inertia::render('POS/Index');
+    })->name('index');
+
+    Route::post('/checkout', PosCheckoutController::class)->name('checkout');
+});
+
+// Parent Dashboard - Parent & Admin Access
+Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
+    Route::get('/parent/dashboard', function () {
+        return Inertia::render('ParentDashboard/Index');
+    })->name('parent.dashboard');
+});
+
+// Admin Panel Routes - Admin Access
+Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/', function () {
+        return redirect()->route('admin.products.index');
+    });
+
+    Route::get('/products', function () {
+        return Inertia::render('Admin/Products/Index');
+    })->name('products.index');
+
+    Route::get('/products/create', function () {
+        return Inertia::render('Admin/Products/Create');
+    })->name('products.create');
+
+    Route::get('/products/edit', function () {
+        return Inertia::render('Admin/Products/Edit');
+    })->name('products.edit');
+
+    Route::get('/audit-logs', function () {
+        return Inertia::render('Admin/AuditLogs/Index');
+    })->name('audit-logs.index');
+});
+
+// Profile Management
+Route::middleware(['auth', 'active'])->group(function () {
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+});
+
+require __DIR__.'/auth.php';
 </file>
 
 </files>

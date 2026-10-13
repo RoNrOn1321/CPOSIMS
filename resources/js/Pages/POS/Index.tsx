@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import POSLayout from '@/Layouts/POSLayout';
 import ProductGrid, { Product } from './Partials/ProductGrid';
 import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
@@ -166,6 +166,7 @@ export default function POSIndex() {
         onClose={() => setIsCheckoutModalOpen(false)}
         totalAmount={totalPayable}
         selectedCustomer={selectedCustomer}
+        cartItems={cartItems}
         onSuccess={() => setCartItems([])}
       />
 
