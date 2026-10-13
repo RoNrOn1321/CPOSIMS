@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\ParentDashboardController;
+use App\Http\Controllers\ParentStudentLimitController;
 use App\Http\Controllers\PosCheckoutController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -39,10 +41,9 @@ Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name
 });
 
 // Parent Dashboard - Parent & Admin Access
-Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
-    Route::get('/parent/dashboard', function () {
-        return Inertia::render('ParentDashboard/Index');
-    })->name('parent.dashboard');
+Route::middleware(['auth', 'active', 'role:parent|admin'])->prefix('parent')->name('parent.')->group(function () {
+    Route::get('/dashboard', [ParentDashboardController::class, 'index'])->name('dashboard');
+    Route::patch('/student-limits/{student}', [ParentStudentLimitController::class, 'update'])->name('student-limits.update');
 });
 
 // Admin Panel Routes - Admin Access

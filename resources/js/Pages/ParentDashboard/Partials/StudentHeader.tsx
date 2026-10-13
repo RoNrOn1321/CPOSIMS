@@ -13,6 +13,13 @@ export default function StudentHeader({
   selectedStudent,
   onSelectStudent,
 }: StudentHeaderProps) {
+  const getShortGrade = (level: string) => {
+    const match = level.match(/Grade\s*(\d+)/i);
+    if (match) return `Gr. ${match[1]}`;
+    const parts = level.split('-');
+    return parts[0].trim();
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div className="flex items-center gap-4">
@@ -35,27 +42,29 @@ export default function StudentHeader({
       </div>
 
       {/* Switch Child Switcher Pills */}
-      <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
-        <span className="text-[11px] font-bold text-slate-500 px-2 uppercase tracking-wider">
-          Switch Child:
-        </span>
-        {students.map(s => {
-          const isSelected = s.id === selectedStudent.id;
-          return (
-            <button
-              key={s.id}
-              onClick={() => onSelectStudent(s.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                isSelected 
-                  ? 'bg-[#5c1516] text-white shadow-xs' 
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
-              }`}
-            >
-              {s.name.split(' ')[0]} ({s.gradeLevel.includes('Grade 6') ? 'Gr. 6' : 'Gr. 10'})
-            </button>
-          );
-        })}
-      </div>
+      {students.length > 1 && (
+        <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
+          <span className="text-[11px] font-bold text-slate-500 px-2 uppercase tracking-wider">
+            Switch Child:
+          </span>
+          {students.map(s => {
+            const isSelected = s.id === selectedStudent.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSelectStudent(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  isSelected 
+                    ? 'bg-[#5c1516] text-white shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+              >
+                {s.name.split(' ')[0]} ({getShortGrade(s.gradeLevel)})
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -104,6 +104,8 @@ app/
         RegisteredUserController.php
         VerifyEmailController.php
       Controller.php
+      ParentDashboardController.php
+      ParentStudentLimitController.php
       PosCheckoutController.php
       ProfileController.php
     Middleware/
@@ -371,6 +373,7 @@ tests/
       CheckoutTest.php
     ExampleTest.php
     ModelRelationshipsTest.php
+    ParentDashboardTest.php
     ProfileTest.php
   Unit/
     ExampleTest.php
@@ -399,42 +402,338 @@ vite.config.js
 <files>
 This section contains the contents of the repository's files.
 
-<file path="resources/js/actions/App/Http/Controllers/PosCheckoutController.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-const PosCheckoutController = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: PosCheckoutController.url(options),
-    method: 'post',
-})
+<file path="app/Http/Controllers/ParentDashboardController.php">
+<?php
 
-PosCheckoutController.definition = {
-    methods: ["post"],
-    url: '/pos/checkout',
-} satisfies RouteDefinition<["post"]>
+namespace App\Http\Controllers;
 
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-PosCheckoutController.url = (options?: RouteQueryOptions) => {
-    return PosCheckoutController.definition.url + queryParams(options)
+use App\Models\StudentAccount;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class ParentDashboardController extends Controller
+{
+    /**
+     * Display the parent portal dashboard with linked student accounts.
+     */
+    public function index(): Response
+    {
+        $userId = Auth::id();
+
+        $students = StudentAccount::where('parent_id', $userId)
+            ->with([
+                'transactions' => function ($query) {
+                    $query->where('status', 'completed')
+                        ->latest('created_at')
+                        ->with(['details.product.category', 'cashier']);
+                },
+            ])
+            ->get();
+
+        $studentsData = $students->map(function (StudentAccount $student) {
+            $completedTransactions = $student->transactions;
+
+            $today = Carbon::today();
+            $startOfWeek = Carbon::now()->startOfWeek();
+            $endOfWeek = Carbon::now()->endOfWeek();
+
+            $spentToday = (float) $completedTransactions
+                ->filter(fn ($t) => Carbon::parse($t->created_at)->isSameDay($today))
+                ->sum('total_amount');
+
+            $weeklySpent = (float) $completedTransactions
+                ->filter(fn ($t) => Carbon::parse($t->created_at)->between($startOfWeek, $endOfWeek))
+                ->sum('total_amount');
+
+            // Compute running balance after each cashless deduction (newest to oldest)
+            $runningBalance = (float) $student->current_balance;
+            $formattedTransactions = [];
+
+            foreach ($completedTransactions as $index => $transaction) {
+                $createdAt = Carbon::parse($transaction->created_at);
+
+                $dateTimeStr = $createdAt->isToday()
+                    ? 'Today, '.$createdAt->format('g:i A')
+                    : ($createdAt->isYesterday()
+                        ? 'Yesterday, '.$createdAt->format('g:i A')
+                        : $createdAt->format('M d, Y g:i A'));
+
+                $hour = (int) $createdAt->format('H');
+                $minute = (int) $createdAt->format('i');
+                $timeDecimal = $hour + ($minute / 60);
+
+                $mealType = match (true) {
+                    $timeDecimal < 10.5 => 'Morning Recess',
+                    $timeDecimal <= 13.5 => 'Lunch Meal',
+                    default => 'Afternoon Snack',
+                };
+
+                $items = $transaction->details->map(function ($detail) {
+                    return [
+                        'name' => $detail->product?->name ?? 'Cafeteria Item',
+                        'qty' => (int) $detail->quantity,
+                        'price' => (float) $detail->unit_price,
+                        'category' => $detail->product?->category?->name ?? 'Cafeteria Items',
+                    ];
+                })->values()->all();
+
+                $total = (float) $transaction->total_amount;
+                $balanceAfter = $runningBalance;
+
+                // For the previous older transaction, reconstruct prior balance if cashless
+                if ($transaction->payment_method === 'cashless') {
+                    $runningBalance = round($runningBalance + $total, 2);
+                }
+
+                $formattedTransactions[] = [
+                    'id' => $transaction->receipt_number,
+                    'studentId' => (int) $student->id,
+                    'dateTime' => $dateTimeStr,
+                    'mealType' => $mealType,
+                    'items' => $items,
+                    'total' => $total,
+                    'terminal' => 'Canteen Terminal #01 (Main Building)',
+                    'paymentMethod' => $transaction->payment_method === 'cashless'
+                        ? 'Student RFID Card Tap'
+                        : 'Cash',
+                    'balanceAfter' => $balanceAfter,
+                    'rawCreatedAt' => $transaction->created_at->toISOString(),
+                ];
+            }
+
+            return [
+                'id' => (int) $student->id,
+                'name' => trim("{$student->first_name} {$student->last_name}"),
+                'gradeLevel' => "{$student->grade_level} - {$student->section}",
+                'studentId' => $student->student_id_number,
+                'rfidUid' => $student->rfid_uid ?? 'N/A',
+                'balance' => (float) $student->current_balance,
+                'dailyLimit' => (float) $student->daily_spending_limit,
+                'spentToday' => round($spentToday, 2),
+                'weeklySpent' => round($weeklySpent, 2),
+                'prohibitedItems' => [],
+                'allergies' => [],
+                'transactions' => $formattedTransactions,
+            ];
+        })->values()->all();
+
+        return Inertia::render('ParentDashboard/Index', [
+            'students' => $studentsData,
+        ]);
+    }
 }
+</file>
 
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-PosCheckoutController.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: PosCheckoutController.url(options),
-    method: 'post',
-})
-export default PosCheckoutController
+<file path="app/Http/Controllers/ParentStudentLimitController.php">
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\StudentAccount;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class ParentStudentLimitController extends Controller
+{
+    /**
+     * Update the daily spending limit for the specified student account.
+     */
+    public function update(Request $request, StudentAccount $student): RedirectResponse
+    {
+        // Enforce parent ownership authorization
+        abort_if((int) $student->parent_id !== (int) Auth::id(), 403, 'Unauthorized access to student account.');
+
+        $validated = $request->validate([
+            'daily_limit' => ['required', 'numeric', 'min:0', 'max:10000'],
+        ]);
+
+        $student->update([
+            'daily_spending_limit' => $validated['daily_limit'],
+            'is_spending_limited' => true,
+        ]);
+
+        return redirect()->back()->with('success', 'Daily spending limit updated successfully.');
+    }
+}
+</file>
+
+<file path="tests/Feature/ParentDashboardTest.php">
+<?php
+
+use App\Models\Category;
+use App\Models\Product;
+use App\Models\StudentAccount;
+use App\Models\Transaction;
+use App\Models\TransactionDetail;
+use App\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
+use Inertia\Testing\AssertableInertia as Assert;
+
+beforeEach(function () {
+    $this->seed(RolesAndPermissionsSeeder::class);
+});
+
+it('allows parents to view their own linked student accounts', function () {
+    $parent = User::factory()->parent()->create();
+    $child = StudentAccount::factory()->create([
+        'parent_id' => $parent->id,
+        'first_name' => 'Juan',
+        'last_name' => 'Dela Cruz',
+        'current_balance' => 450.00,
+        'daily_spending_limit' => 120.00,
+    ]);
+
+    $response = $this->actingAs($parent)->get(route('parent.dashboard'));
+
+    $response->assertOk();
+    $response->assertInertia(fn (Assert $page) => $page
+        ->component('ParentDashboard/Index')
+        ->has('students', 1)
+        ->where('students.0.id', $child->id)
+        ->where('students.0.name', 'Juan Dela Cruz')
+        ->where('students.0.balance', 450)
+        ->where('students.0.dailyLimit', 120)
+    );
+});
+
+it('prevents parents from viewing student accounts linked to other parents', function () {
+    $parentA = User::factory()->parent()->create();
+    $parentB = User::factory()->parent()->create();
+
+    $childA = StudentAccount::factory()->create([
+        'parent_id' => $parentA->id,
+        'first_name' => 'Child',
+        'last_name' => 'Alpha',
+    ]);
+
+    $childB = StudentAccount::factory()->create([
+        'parent_id' => $parentB->id,
+        'first_name' => 'Child',
+        'last_name' => 'Beta',
+    ]);
+
+    $response = $this->actingAs($parentA)->get(route('parent.dashboard'));
+
+    $response->assertOk();
+    $response->assertInertia(fn (Assert $page) => $page
+        ->component('ParentDashboard/Index')
+        ->has('students', 1)
+        ->where('students.0.id', $childA->id)
+        ->where('students.0.name', 'Child Alpha')
+    );
+});
+
+it('allows parents to update the daily spending limit of their child', function () {
+    $parent = User::factory()->parent()->create();
+    $child = StudentAccount::factory()->create([
+        'parent_id' => $parent->id,
+        'daily_spending_limit' => 100.00,
+    ]);
+
+    $response = $this->actingAs($parent)->patch(
+        route('parent.student-limits.update', $child),
+        ['daily_limit' => 250.00]
+    );
+
+    $response->assertRedirect();
+    $response->assertSessionHas('success');
+
+    expect($child->fresh()->daily_spending_limit)->toBe('250.00');
+});
+
+it('prevents parents from updating the limit of a child that is not theirs', function () {
+    $parentA = User::factory()->parent()->create();
+    $parentB = User::factory()->parent()->create();
+
+    $childB = StudentAccount::factory()->create([
+        'parent_id' => $parentB->id,
+        'daily_spending_limit' => 100.00,
+    ]);
+
+    $response = $this->actingAs($parentA)->patch(
+        route('parent.student-limits.update', $childB),
+        ['daily_limit' => 500.00]
+    );
+
+    $response->assertForbidden();
+
+    expect($childB->fresh()->daily_spending_limit)->toBe('100.00');
+});
+
+it('validates daily spending limit input', function () {
+    $parent = User::factory()->parent()->create();
+    $child = StudentAccount::factory()->create([
+        'parent_id' => $parent->id,
+        'daily_spending_limit' => 100.00,
+    ]);
+
+    $response = $this->actingAs($parent)->patch(
+        route('parent.student-limits.update', $child),
+        ['daily_limit' => -50]
+    );
+
+    $response->assertSessionHasErrors('daily_limit');
+    expect($child->fresh()->daily_spending_limit)->toBe('100.00');
+});
+
+it('prevents unauthenticated guests or non-parents from updating student limits', function () {
+    $child = StudentAccount::factory()->create([
+        'daily_spending_limit' => 100.00,
+    ]);
+    $cashier = User::factory()->cashier()->create();
+
+    // Guest redirected to login
+    $this->patch(route('parent.student-limits.update', $child), ['daily_limit' => 200.00])
+        ->assertRedirect('/login');
+
+    // Cashier forbidden
+    $this->actingAs($cashier)
+        ->patch(route('parent.student-limits.update', $child), ['daily_limit' => 200.00])
+        ->assertForbidden();
+
+    expect($child->fresh()->daily_spending_limit)->toBe('100.00');
+});
+
+it('includes itemized transaction history and products in the dashboard prop', function () {
+    $parent = User::factory()->parent()->create();
+    $child = StudentAccount::factory()->create(['parent_id' => $parent->id]);
+    $cashier = User::factory()->cashier()->create();
+    $category = Category::factory()->create(['name' => 'Rice Meals']);
+    $product = Product::factory()->create([
+        'name' => 'Chicken Adobo Rice Bowl',
+        'category_id' => $category->id,
+    ]);
+
+    $transaction = Transaction::factory()->create([
+        'student_account_id' => $child->id,
+        'cashier_id' => $cashier->id,
+        'total_amount' => 85.00,
+        'payment_method' => 'cashless',
+        'status' => 'completed',
+    ]);
+
+    TransactionDetail::factory()->create([
+        'transaction_id' => $transaction->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+        'unit_price' => 85.00,
+        'subtotal' => 85.00,
+    ]);
+
+    $response = $this->actingAs($parent)->get(route('parent.dashboard'));
+
+    $response->assertOk();
+    $response->assertInertia(fn (Assert $page) => $page
+        ->component('ParentDashboard/Index')
+        ->has('students.0.transactions', 1)
+        ->where('students.0.transactions.0.id', $transaction->receipt_number)
+        ->where('students.0.transactions.0.items.0.name', 'Chicken Adobo Rice Bowl')
+        ->where('students.0.transactions.0.items.0.category', 'Rice Meals')
+    );
+});
 </file>
 
 <file path=".claude/skills/deploying-to-cloud/reference/checklists.md">
@@ -7879,17 +8178,42 @@ VerifyEmailController.head = (args: { id: string | number, hash: string | number
 export default VerifyEmailController
 </file>
 
-<file path="resources/js/actions/App/Http/Controllers/index.ts">
-import PosCheckoutController from './PosCheckoutController'
-import ProfileController from './ProfileController'
-import Auth from './Auth'
-const Controllers = {
-    PosCheckoutController: Object.assign(PosCheckoutController, PosCheckoutController),
-ProfileController: Object.assign(ProfileController, ProfileController),
-Auth: Object.assign(Auth, Auth),
+<file path="resources/js/actions/App/Http/Controllers/PosCheckoutController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+const PosCheckoutController = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: PosCheckoutController.url(options),
+    method: 'post',
+})
+
+PosCheckoutController.definition = {
+    methods: ["post"],
+    url: '/pos/checkout',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+PosCheckoutController.url = (options?: RouteQueryOptions) => {
+    return PosCheckoutController.definition.url + queryParams(options)
 }
 
-export default Controllers
+/**
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
+ */
+PosCheckoutController.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: PosCheckoutController.url(options),
+    method: 'post',
+})
+export default PosCheckoutController
 </file>
 
 <file path="resources/js/actions/App/Http/index.ts">
@@ -9527,99 +9851,6 @@ export function useBarcodeScanner(onScan: (barcode: string) => void) {
 }
 </file>
 
-<file path="resources/js/Hooks/usePOSCart.ts">
-import { useState, useMemo } from 'react';
-
-export interface CartItem {
-  product: {
-    id: number;
-    name?: string;
-    price: number;
-    image?: string;
-    category?: string;
-    stock_quantity?: number;
-    [key: string]: any;
-  };
-  quantity: number;
-}
-
-export interface CheckoutCartItemPayload {
-  product_id: number;
-  quantity: number;
-  unit_price: number;
-}
-
-/**
- * Format cart items into the shape strictly required by PosCheckoutRequest
- * (product_id, quantity, unit_price).
- */
-export function formatCartForCheckout(
-  cartItems: Array<{ product: { id: number | string; price: number | string }; quantity: number }>
-): CheckoutCartItemPayload[] {
-  return cartItems.map((item) => ({
-    product_id: Number(item.product.id),
-    quantity: Number(item.quantity),
-    unit_price: Number(item.product.price),
-  }));
-}
-
-export function usePOSCart(dailyLimit?: number) {
-  const [items, setItems] = useState<CartItem[]>([]);
-
-  const addItem = (product: any, quantity: number = 1) => {
-    setItems((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
-      if (existing) {
-        return prev.map((item) =>
-          item.product.id === product.id
-            ? { ...item, quantity: item.quantity + quantity }
-            : item
-        );
-      }
-      return [...prev, { product, quantity }];
-    });
-  };
-
-  const updateQuantity = (productId: number, quantity: number) => {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.product.id === productId ? { ...item, quantity } : item
-      )
-    );
-  };
-
-  const removeItem = (productId: number) => {
-    setItems((prev) => prev.filter((item) => item.product.id !== productId));
-  };
-
-  const clearCart = () => setItems([]);
-
-  const subtotal = useMemo(() => {
-    return items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  }, [items]);
-
-  const exceedsLimit = useMemo(() => {
-    return dailyLimit ? subtotal > dailyLimit : false;
-  }, [subtotal, dailyLimit]);
-
-  const getCheckoutItems = (): CheckoutCartItemPayload[] => {
-    return formatCartForCheckout(items);
-  };
-
-  return {
-    items,
-    addItem,
-    updateQuantity,
-    removeItem,
-    clearCart,
-    subtotal,
-    exceedsLimit,
-    getCheckoutItems,
-    formatForCheckout: getCheckoutItems,
-  };
-}
-</file>
-
 <file path="resources/js/Layouts/POSLayout.tsx">
 import React from 'react';
 import { 
@@ -9858,13 +10089,29 @@ interface DietaryRestrictionsTabProps {
 export default function DietaryRestrictionsTab({
   student,
 }: DietaryRestrictionsTabProps) {
+  const allergies = student.allergies || [];
+  const prohibited = student.prohibitedItems || [];
+
   const [restrictions, setRestrictions] = useState({
-    peanutAllergy: student.allergies.includes('Peanuts'),
-    seafoodAllergy: student.allergies.includes('Seafood / Shrimp'),
-    blockSoda: student.prohibitedItems.includes('Carbonated Sodas'),
-    blockNoodles: student.prohibitedItems.includes('Instant Noodles'),
-    blockCaffeine: student.prohibitedItems.includes('High-Caffeine Energy Drinks'),
+    peanutAllergy: allergies.includes('Peanuts'),
+    seafoodAllergy: allergies.includes('Seafood / Shrimp'),
+    blockSoda: prohibited.includes('Carbonated Sodas'),
+    blockNoodles: prohibited.includes('Instant Noodles'),
+    blockCaffeine: prohibited.includes('High-Caffeine Energy Drinks'),
   });
+
+  React.useEffect(() => {
+    const currentAllergies = student.allergies || [];
+    const currentProhibited = student.prohibitedItems || [];
+    setRestrictions({
+      peanutAllergy: currentAllergies.includes('Peanuts'),
+      seafoodAllergy: currentAllergies.includes('Seafood / Shrimp'),
+      blockSoda: currentProhibited.includes('Carbonated Sodas'),
+      blockNoodles: currentProhibited.includes('Instant Noodles'),
+      blockCaffeine: currentProhibited.includes('High-Caffeine Energy Drinks'),
+    });
+  }, [student.id, student.allergies, student.prohibitedItems]);
+
 
   return (
     <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
@@ -10174,7 +10421,7 @@ export default function MealHistoryTab({
 </file>
 
 <file path="resources/js/Pages/ParentDashboard/Partials/OverviewTab.tsx">
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Components/ui/card';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
@@ -10196,9 +10443,9 @@ import { Student, Transaction, WeeklySpendingPoint, CategoryDistributionPoint } 
 
 interface OverviewTabProps {
   student: Student;
-  weeklySpendingData: WeeklySpendingPoint[];
-  categoryDistribution: CategoryDistributionPoint[];
-  todayTransaction: Transaction;
+  weeklySpendingData?: WeeklySpendingPoint[];
+  categoryDistribution?: CategoryDistributionPoint[];
+  todayTransaction?: Transaction | null;
   onViewReceipt: (txn: Transaction) => void;
 }
 
@@ -10209,6 +10456,107 @@ export default function OverviewTab({
   todayTransaction,
   onViewReceipt,
 }: OverviewTabProps) {
+  const transactions = useMemo(() => student.transactions || [], [student.transactions]);
+
+  // Dynamic Weekly Spending calculation
+  const computedWeeklySpendingData = useMemo<WeeklySpendingPoint[]>(() => {
+    if (weeklySpendingData && weeklySpendingData.length > 0) {
+      return weeklySpendingData;
+    }
+
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const dayIndexMap: Record<number, number> = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4 };
+
+    const now = new Date();
+    const currentDayOfWeek = now.getDay(); // 0=Sun, 1=Mon...
+
+    const points: WeeklySpendingPoint[] = dayLabels.map((day, idx) => {
+      const isToday = (idx + 1) === currentDayOfWeek;
+      return {
+        day: isToday ? `${day} (Today)` : day,
+        amount: 0,
+        limit: student.dailyLimit,
+        meals: 0,
+        snacks: 0,
+      };
+    });
+
+    const diffToMonday = (currentDayOfWeek === 0 ? -6 : 1) - currentDayOfWeek;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const friday = new Date(monday);
+    friday.setDate(monday.getDate() + 4);
+    friday.setHours(23, 59, 59, 999);
+
+    transactions.forEach(txn => {
+      const txnDate = txn.rawCreatedAt ? new Date(txn.rawCreatedAt) : new Date(txn.dateTime);
+      if (!isNaN(txnDate.getTime())) {
+        const dayOfWeek = txnDate.getDay();
+        if (dayOfWeek >= 1 && dayOfWeek <= 5 && txnDate >= monday && txnDate <= friday) {
+          const pointIdx = dayIndexMap[dayOfWeek];
+          if (pointIdx !== undefined) {
+            points[pointIdx].amount = Number((points[pointIdx].amount + txn.total).toFixed(2));
+            if (txn.mealType.toLowerCase().includes('lunch') || txn.mealType.toLowerCase().includes('meal')) {
+              points[pointIdx].meals += 1;
+            } else {
+              points[pointIdx].snacks += 1;
+            }
+          }
+        }
+      }
+    });
+
+    return points;
+  }, [transactions, student.dailyLimit, weeklySpendingData]);
+
+  // Dynamic Category Distribution calculation
+  const computedCategoryDistribution = useMemo<CategoryDistributionPoint[]>(() => {
+    if (categoryDistribution && categoryDistribution.length > 0) {
+      return categoryDistribution;
+    }
+
+    const categoryTotals: Record<string, number> = {};
+    transactions.forEach(txn => {
+      txn.items.forEach(item => {
+        const cat = item.category || 'Cafeteria Items';
+        categoryTotals[cat] = (categoryTotals[cat] ?? 0) + (item.price * item.qty);
+      });
+    });
+
+    const categoryColors: Record<string, string> = {
+      'Rice Meals': '#5c1516',
+      'Beverages': '#008dd5',
+      'Fresh Drinks': '#008dd5',
+      'Snacks & Sandwiches': '#d38c28',
+      'Snacks': '#d38c28',
+      'Fruits & Bakery': '#10b981',
+      'Bakery': '#10b981',
+      'Healthy': '#10b981',
+      'Cafeteria Items': '#5c1516',
+    };
+
+    const defaultPalette = ['#5c1516', '#008dd5', '#d38c28', '#10b981', '#8b5cf6', '#ec4899', '#64748b'];
+    const entries = Object.entries(categoryTotals);
+
+    if (entries.length === 0) {
+      return [
+        { name: 'No Purchases Yet', value: 1, color: '#e2e8f0' }
+      ];
+    }
+
+    return entries.map(([name, value], idx) => ({
+      name,
+      value: Number(value.toFixed(2)),
+      color: categoryColors[name] || defaultPalette[idx % defaultPalette.length],
+    }));
+  }, [transactions, categoryDistribution]);
+
+  const activeTodayTransaction = todayTransaction !== undefined 
+    ? todayTransaction 
+    : (transactions.find(t => t.dateTime.toLowerCase().includes('today')) ?? null);
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -10232,7 +10580,7 @@ export default function OverviewTab({
           <CardContent className="pt-6">
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={weeklySpendingData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={computedWeeklySpendingData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="maroonGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#5c1516" stopOpacity={0.4}/>
@@ -10275,13 +10623,13 @@ export default function OverviewTab({
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={categoryDistribution}
+                    data={computedCategoryDistribution}
                     innerRadius={50}
                     outerRadius={75}
                     paddingAngle={5}
                     dataKey="value"
                   >
-                    {categoryDistribution.map((entry, index) => (
+                    {computedCategoryDistribution.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
@@ -10292,7 +10640,7 @@ export default function OverviewTab({
 
             {/* Legend */}
             <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-100">
-              {categoryDistribution.map(cat => (
+              {computedCategoryDistribution.map(cat => (
                 <div key={cat.name} className="flex items-center gap-2 text-xs">
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                   <span className="text-slate-600 truncate text-[11px] font-semibold">{cat.name}</span>
@@ -10321,35 +10669,45 @@ export default function OverviewTab({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 text-[#d38c28] flex items-center justify-center shrink-0">
-                  <Utensils size={18} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-800">Chicken Adobo Rice Bowl + Calamansi Juice</span>
-                    <Badge variant="outline" className="text-[10px] font-semibold">Lunch (12:15 PM)</Badge>
+          {activeTodayTransaction ? (
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-xl border border-slate-200/80 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-[#d38c28] flex items-center justify-center shrink-0">
+                    <Utensils size={18} />
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Terminal #01 (Main High School Canteen) &bull; 450 kcal
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-800">
+                        {activeTodayTransaction.items.map(i => `${i.name} (x${i.qty})`).join(', ') || 'Cafeteria Order'}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] font-semibold">
+                        {activeTodayTransaction.mealType} ({activeTodayTransaction.dateTime})
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {activeTodayTransaction.terminal} &bull; Paid via: {activeTodayTransaction.paymentMethod}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-2 sm:pt-0">
-                <span className="font-extrabold text-sm text-[#5c1516]">{formatMoney(todayTransaction.total)}</span>
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => onViewReceipt(todayTransaction)}
-                  className="text-xs h-8 px-2.5 rounded-lg border-slate-200 text-slate-700"
-                >
-                  <Receipt size={13} className="mr-1" /> e-Receipt
-                </Button>
+                <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 pt-2 sm:pt-0">
+                  <span className="font-extrabold text-sm text-[#5c1516]">{formatMoney(activeTodayTransaction.total)}</span>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => onViewReceipt(activeTodayTransaction)}
+                    className="text-xs h-8 px-2.5 rounded-lg border-slate-200 text-slate-700"
+                  >
+                    <Receipt size={13} className="mr-1" /> e-Receipt
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              No cafeteria purchases recorded for today.
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -10503,18 +10861,19 @@ export default function QuickStatsGrid({
 </file>
 
 <file path="resources/js/Pages/ParentDashboard/Partials/SpendingLimitsTab.tsx">
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { router } from '@inertiajs/react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/Components/ui/card';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import { Student } from '../types';
 
 interface SpendingLimitsTabProps {
   student: Student;
-  onSaveLimit: (newLimit: number) => void;
+  onSaveLimit?: (newLimit: number) => void;
 }
 
 export default function SpendingLimitsTab({
@@ -10522,12 +10881,32 @@ export default function SpendingLimitsTab({
   onSaveLimit,
 }: SpendingLimitsTabProps) {
   const [dailyLimitInput, setDailyLimitInput] = useState<number>(student.dailyLimit);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSavedToast, setIsSavedToast] = useState<boolean>(false);
 
+  useEffect(() => {
+    setDailyLimitInput(student.dailyLimit);
+  }, [student.id, student.dailyLimit]);
+
   const handleSave = () => {
-    onSaveLimit(dailyLimitInput);
-    setIsSavedToast(true);
-    setTimeout(() => setIsSavedToast(false), 2500);
+    setIsSubmitting(true);
+    router.patch(
+      `/parent/student-limits/${student.id}`,
+      { daily_limit: dailyLimitInput },
+      {
+        preserveScroll: true,
+        onSuccess: () => {
+          setIsSavedToast(true);
+          if (onSaveLimit) {
+            onSaveLimit(dailyLimitInput);
+          }
+          setTimeout(() => setIsSavedToast(false), 3000);
+        },
+        onFinish: () => {
+          setIsSubmitting(false);
+        },
+      }
+    );
   };
 
   return (
@@ -10556,6 +10935,7 @@ export default function SpendingLimitsTab({
                     type="number"
                     value={dailyLimitInput}
                     onChange={(e) => setDailyLimitInput(Number(e.target.value))}
+                    disabled={isSubmitting}
                     className="pl-8 text-right font-extrabold text-sm h-10 bg-white"
                   />
                 </div>
@@ -10569,6 +10949,7 @@ export default function SpendingLimitsTab({
                 <button
                   key={val}
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setDailyLimitInput(val)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
                     dailyLimitInput === val 
@@ -10611,9 +10992,11 @@ export default function SpendingLimitsTab({
         <CardFooter className="border-t border-slate-100 pt-4 flex justify-end">
           <Button 
             onClick={handleSave}
-            className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-sm"
+            disabled={isSubmitting}
+            className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-sm flex items-center gap-1.5"
           >
-            Save Spending Limits
+            {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+            {isSubmitting ? 'Saving...' : 'Save Spending Limits'}
           </Button>
         </CardFooter>
       </Card>
@@ -10675,6 +11058,13 @@ export default function StudentHeader({
   selectedStudent,
   onSelectStudent,
 }: StudentHeaderProps) {
+  const getShortGrade = (level: string) => {
+    const match = level.match(/Grade\s*(\d+)/i);
+    if (match) return `Gr. ${match[1]}`;
+    const parts = level.split('-');
+    return parts[0].trim();
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div className="flex items-center gap-4">
@@ -10697,27 +11087,29 @@ export default function StudentHeader({
       </div>
 
       {/* Switch Child Switcher Pills */}
-      <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
-        <span className="text-[11px] font-bold text-slate-500 px-2 uppercase tracking-wider">
-          Switch Child:
-        </span>
-        {students.map(s => {
-          const isSelected = s.id === selectedStudent.id;
-          return (
-            <button
-              key={s.id}
-              onClick={() => onSelectStudent(s.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                isSelected 
-                  ? 'bg-[#5c1516] text-white shadow-xs' 
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
-              }`}
-            >
-              {s.name.split(' ')[0]} ({s.gradeLevel.includes('Grade 6') ? 'Gr. 6' : 'Gr. 10'})
-            </button>
-          );
-        })}
-      </div>
+      {students.length > 1 && (
+        <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
+          <span className="text-[11px] font-bold text-slate-500 px-2 uppercase tracking-wider">
+            Switch Child:
+          </span>
+          {students.map(s => {
+            const isSelected = s.id === selectedStudent.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSelectStudent(s.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  isSelected 
+                    ? 'bg-[#5c1516] text-white shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+              >
+                {s.name.split(' ')[0]} ({getShortGrade(s.gradeLevel)})
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -10894,8 +11286,10 @@ export interface Student {
   balance: number;
   dailyLimit: number;
   spentToday: number;
+  weeklySpent?: number;
   prohibitedItems: string[];
   allergies: string[];
+  transactions?: Transaction[];
 }
 
 export interface TransactionItem {
@@ -10915,6 +11309,7 @@ export interface Transaction {
   terminal: string;
   paymentMethod: string;
   balanceAfter: number;
+  rawCreatedAt?: string;
 }
 
 export interface WeeklySpendingPoint {
@@ -11250,539 +11645,6 @@ export default function ActiveCart({
 }
 </file>
 
-<file path="resources/js/Pages/POS/Partials/CheckoutModal.tsx">
-import React, { useState, useEffect } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
-import { Input } from "@/Components/ui/input";
-import { Badge } from "@/Components/ui/badge";
-import { formatMoney } from '@/lib/formatters';
-import {
-  CreditCard,
-  Banknote,
-  QrCode,
-  CheckCircle2,
-  User,
-  Printer,
-  AlertTriangle,
-  Radio,
-  Loader2,
-  Check,
-} from 'lucide-react';
-import { StudentCustomer, CartItem } from './ActiveCart';
-import { formatCartForCheckout } from '@/Hooks/usePOSCart';
-import { checkout } from '@/routes/pos';
-import axios from 'axios';
-
-interface CheckoutModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  totalAmount: number;
-  selectedCustomer: StudentCustomer | null;
-  cartItems?: CartItem[];
-  onSuccess: (receipt?: any) => void;
-}
-
-export default function CheckoutModal({
-  isOpen,
-  onClose,
-  totalAmount,
-  selectedCustomer,
-  cartItems = [],
-  onSuccess,
-}: CheckoutModalProps) {
-  const [paymentMethod, setPaymentMethod] = useState<'rfid' | 'cash' | 'qr'>('cash');
-  const [cashTendered, setCashTendered] = useState<number>(totalAmount);
-  const [rfidUid, setRfidUid] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successReceipt, setSuccessReceipt] = useState<any | null>(null);
-  const [scanPulse, setScanPulse] = useState<boolean>(false);
-
-  // Quick cash denominations in Philippine Peso
-  const denominations = [50, 100, 200, 500, 1000];
-  const change = Math.max(0, cashTendered - totalAmount);
-
-  // Synchronize initial state when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setCashTendered(totalAmount);
-      setErrorMessage(null);
-      setSuccessReceipt(null);
-      setIsSubmitting(false);
-    } else {
-      setRfidUid('');
-      setErrorMessage(null);
-      setSuccessReceipt(null);
-      setIsSubmitting(false);
-    }
-  }, [isOpen, totalAmount]);
-
-  // RFID Scanner Event Listener (USB Hardware Keyboard Emulator)
-  useEffect(() => {
-    if (!isOpen || paymentMethod !== 'rfid' || successReceipt) return;
-
-    let buffer = '';
-    let lastTime = 0;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isManualRfid = target?.getAttribute('data-manual-rfid') === 'true';
-
-      // If cashier is typing manually in the designated RFID field, skip global key capture
-      if (['INPUT', 'TEXTAREA'].includes(target.tagName) && isManualRfid) {
-        return;
-      }
-
-      const now = Date.now();
-      // Hardware scanner sends keys rapidly (< 120ms intervals)
-      if (now - lastTime > 150) {
-        buffer = '';
-      }
-      lastTime = now;
-
-      if (e.key === 'Enter') {
-        if (buffer.trim().length >= 3) {
-          e.preventDefault();
-          const scanned = buffer.trim();
-          setRfidUid(scanned);
-          setErrorMessage(null);
-          setScanPulse(true);
-          setTimeout(() => setScanPulse(false), 1500);
-          buffer = '';
-        }
-      } else if (e.key.length === 1) {
-        buffer += e.key;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, paymentMethod, successReceipt]);
-
-  // Handle Checkout Submission
-  const handleProcess = async () => {
-    if (isSubmitting) return;
-    setErrorMessage(null);
-
-    // Cash Tender Validation
-    if (paymentMethod === 'cash' && cashTendered < totalAmount) {
-      setErrorMessage('Amount tendered is less than the total payable amount.');
-      return;
-    }
-
-    // Cashless RFID Validation
-    if (paymentMethod === 'rfid' && !rfidUid.trim()) {
-      setErrorMessage('Please tap or enter a student RFID card before confirming checkout.');
-      return;
-    }
-
-    if (!cartItems || cartItems.length === 0) {
-      setErrorMessage('Cart is empty. Add products before proceeding.');
-      return;
-    }
-
-    const formattedItems = formatCartForCheckout(cartItems);
-    if (formattedItems.length === 0) {
-      setErrorMessage('No valid cart items to checkout.');
-      return;
-    }
-
-    const payload = {
-      payment_method: paymentMethod === 'rfid' ? 'cashless' : 'cash',
-      rfid_uid: paymentMethod === 'rfid' ? rfidUid.trim() : null,
-      amount_tendered: paymentMethod === 'rfid' ? totalAmount : cashTendered,
-      items: formattedItems,
-    };
-
-    setIsSubmitting(true);
-
-    try {
-      const endpoint = checkout.url();
-      const response = await axios.post(endpoint, payload, {
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (response.status === 201 || response.status === 200) {
-        const receipt = response.data?.receipt;
-        setSuccessReceipt(receipt);
-        onSuccess(receipt);
-      }
-    } catch (err: any) {
-      let message = 'Transaction could not be processed. Please try again.';
-      if (err.response?.data?.message) {
-        message = err.response.data.message;
-      } else if (err.response?.data?.errors) {
-        const firstKey = Object.keys(err.response.data.errors)[0];
-        message = err.response.data.errors[firstKey][0];
-      } else if (err.message) {
-        message = err.message;
-      }
-      setErrorMessage(message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden rounded-2xl border-0 shadow-2xl bg-white">
-        {/* Header */}
-        <div className="bg-[#5c1516] text-white p-6 relative">
-          <DialogHeader className="text-left space-y-1">
-            <div className="flex items-center justify-between">
-              <Badge className="bg-amber-400 text-amber-950 font-bold border-0 text-[10px] px-2 py-0.5">
-                PAYMENT CHECKOUT
-              </Badge>
-              {selectedCustomer && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-200">
-                  <User size={13} />
-                  <span>{selectedCustomer.name}</span>
-                </div>
-              )}
-            </div>
-            <DialogTitle className="text-xl font-extrabold text-white tracking-tight">
-              Settle Order Payment
-            </DialogTitle>
-            <DialogDescription className="text-amber-100/80 text-xs">
-              Select cash payment or tap student RFID card to debit balance.
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* Amount Due Big Display */}
-          <div className="mt-4 p-4 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 flex items-baseline justify-between">
-            <span className="text-xs uppercase font-bold tracking-wider text-amber-200">Total Payable</span>
-            <span className="text-3xl font-black text-amber-300 tracking-tight">
-              {formatMoney(totalAmount)}
-            </span>
-          </div>
-        </div>
-
-        {/* Content Body */}
-        <div className="p-6 space-y-4">
-          {/* Error Banner */}
-          {errorMessage && (
-            <div className="p-3.5 bg-red-50 border border-red-200/80 rounded-xl flex items-start gap-2.5 text-red-900 animate-in fade-in duration-200">
-              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
-              <div className="text-xs space-y-0.5">
-                <span className="font-bold block">Payment Blocked</span>
-                <p className="text-red-700">{errorMessage}</p>
-              </div>
-            </div>
-          )}
-
-          {successReceipt ? (
-            /* Success Receipt Display */
-            <div className="py-4 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-200">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center animate-bounce">
-                <CheckCircle2 size={36} />
-              </div>
-              <div className="space-y-0.5">
-                <h4 className="font-extrabold text-slate-800 text-lg">Transaction Complete!</h4>
-                <p className="text-xs text-slate-500">Official canteen receipt registered.</p>
-              </div>
-
-              {/* Receipt Summary Card */}
-              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-semibold">Receipt Number:</span>
-                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    {successReceipt.receipt_number}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-semibold">Payment Mode:</span>
-                  <span className="uppercase font-bold text-[#5c1516]">{successReceipt.payment_method}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-semibold">Total Paid:</span>
-                  <span className="font-bold text-slate-900">{formatMoney(successReceipt.total_amount)}</span>
-                </div>
-                {successReceipt.student && (
-                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
-                    <span className="text-slate-500 font-semibold">Remaining Balance:</span>
-                    <span className="font-bold text-emerald-700">
-                      {formatMoney(successReceipt.student.remaining_balance)}
-                    </span>
-                  </div>
-                )}
-                {successReceipt.change_amount > 0 && (
-                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
-                    <span className="text-slate-500 font-semibold">Change Returned:</span>
-                    <span className="font-bold text-emerald-700">
-                      {formatMoney(successReceipt.change_amount)}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <Button
-                onClick={onClose}
-                className="w-full bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 rounded-xl shadow-md"
-              >
-                Close & Return to POS
-              </Button>
-            </div>
-          ) : (
-            <>
-              {/* Payment Methods Selector */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wider">
-                  Payment Method
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => {
-                      setPaymentMethod('cash');
-                      setErrorMessage(null);
-                    }}
-                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
-                      paymentMethod === 'cash'
-                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    <Banknote size={18} />
-                    <span>Cash</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => {
-                      setPaymentMethod('rfid');
-                      setErrorMessage(null);
-                    }}
-                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
-                      paymentMethod === 'rfid'
-                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    <CreditCard size={18} />
-                    <span>Student RFID</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={() => {
-                      setPaymentMethod('qr');
-                      setErrorMessage(null);
-                    }}
-                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
-                      paymentMethod === 'qr'
-                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    <QrCode size={18} />
-                    <span>GCash / Maya</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Conditional Method Body */}
-              {paymentMethod === 'cash' && (
-                <div className="space-y-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                    <span>Cash Received:</span>
-                    <Input
-                      type="number"
-                      disabled={isSubmitting}
-                      value={cashTendered}
-                      onChange={(e) => {
-                        setCashTendered(Number(e.target.value));
-                        if (errorMessage) setErrorMessage(null);
-                      }}
-                      className="w-32 h-9 text-right font-bold text-base bg-white"
-                    />
-                  </div>
-
-                  {/* Fast Denomination Buttons */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isSubmitting}
-                      onClick={() => setCashTendered(totalAmount)}
-                      className="h-7 text-[11px] font-semibold bg-white border-slate-200"
-                    >
-                      Exact (₱{totalAmount})
-                    </Button>
-                    {denominations
-                      .filter((d) => d >= totalAmount)
-                      .map((d) => (
-                        <Button
-                          key={d}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={isSubmitting}
-                          onClick={() => setCashTendered(d)}
-                          className="h-7 text-[11px] font-semibold bg-white border-slate-200"
-                        >
-                          ₱{d}
-                        </Button>
-                      ))}
-                  </div>
-
-                  {/* Change Computation */}
-                  <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-600">Change Due:</span>
-                    <span className="text-base font-extrabold text-emerald-600">
-                      {formatMoney(change)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {paymentMethod === 'rfid' && (
-                <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-3">
-                  <div className="flex flex-col items-center text-center space-y-1.5">
-                    <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                        rfidUid
-                          ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500'
-                          : scanPulse
-                          ? 'bg-amber-200 text-amber-900 ring-4 ring-amber-300'
-                          : 'bg-amber-100 text-amber-800 animate-pulse'
-                      }`}
-                    >
-                      {rfidUid ? <Check size={22} /> : <CreditCard size={22} />}
-                    </div>
-
-                    <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                      {rfidUid ? (
-                        <>
-                          <span className="text-emerald-700">Card Captured</span>
-                        </>
-                      ) : (
-                        <>
-                          <Radio size={14} className="animate-spin text-amber-600" />
-                          <span>Tap RFID Card to Terminal Reader</span>
-                        </>
-                      )}
-                    </h5>
-
-                    <p className="text-[11px] text-slate-500 max-w-xs">
-                      {selectedCustomer
-                        ? `Account: ${selectedCustomer.name} (Balance: ${formatMoney(selectedCustomer.balance)})`
-                        : 'Scanner acts automatically as keyboard input.'}
-                    </p>
-                  </div>
-
-                  {/* RFID Input Field (Keyboard Scanner or Manual Entry) */}
-                  <div className="space-y-1 pt-1">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        data-manual-rfid="true"
-                        type="text"
-                        placeholder="Waiting for RFID tap or enter UID..."
-                        value={rfidUid}
-                        disabled={isSubmitting}
-                        onChange={(e) => {
-                          setRfidUid(e.target.value);
-                          if (errorMessage) setErrorMessage(null);
-                        }}
-                        className={`font-mono text-center font-bold tracking-wider text-xs h-9 bg-white transition-all ${
-                          rfidUid ? 'border-emerald-500 ring-1 ring-emerald-500' : ''
-                        }`}
-                      />
-                      {rfidUid && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          disabled={isSubmitting}
-                          onClick={() => setRfidUid('')}
-                          className="h-9 px-2 text-[11px] text-slate-400 hover:text-slate-600"
-                        >
-                          Clear
-                        </Button>
-                      )}
-                    </div>
-                    {rfidUid && (
-                      <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700 font-semibold">
-                        <CheckCircle2 size={12} />
-                        <span>Ready to deduct {formatMoney(totalAmount)} from card</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {paymentMethod === 'qr' && (
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col items-center text-center space-y-2">
-                  <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-                    <QrCode size={22} />
-                  </div>
-                  <h5 className="font-bold text-xs text-slate-800">GCash / Maya Dynamic QR</h5>
-                  <p className="text-[11px] text-slate-500">
-                    Digital QR gateway integration is in progress. Please use Cash or Student RFID.
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        {!successReceipt && (
-          <DialogFooter className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between sm:justify-between gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={isSubmitting}
-              onClick={onClose}
-              className="text-slate-500 text-xs"
-            >
-              Back to Cart
-            </Button>
-            <Button
-              onClick={handleProcess}
-              disabled={
-                isSubmitting ||
-                (paymentMethod === 'cash' && cashTendered < totalAmount) ||
-                (paymentMethod === 'rfid' && !rfidUid.trim()) ||
-                paymentMethod === 'qr'
-              }
-              className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Printer size={15} />
-                  Confirm & Print Receipt
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-</file>
-
 <file path="resources/js/Pages/POS/Partials/ProductGrid.tsx">
 import React, { useState, useMemo } from 'react';
 import { Plus, Utensils, Coffee, Sandwich, Cookie, Apple, Flame, Check } from 'lucide-react';
@@ -12092,302 +11954,6 @@ export default function ProductGrid({
         )}
       </ScrollArea>
     </div>
-  );
-}
-</file>
-
-<file path="resources/js/Pages/POS/Index.tsx">
-import React, { useState, useMemo } from 'react';
-import POSLayout from '@/Layouts/POSLayout';
-import ProductGrid, { Product } from './Partials/ProductGrid';
-import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
-import CheckoutModal from './Partials/CheckoutModal';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/Components/ui/dialog";
-import { Button } from "@/Components/ui/button";
-import { Badge } from "@/Components/ui/badge";
-import { formatMoney } from '@/lib/formatters';
-import { UserCheck, Users, Clock, AlertCircle } from 'lucide-react';
-
-const mockStudents: StudentCustomer[] = [
-  {
-    id: 101,
-    name: 'Juan Dela Cruz',
-    gradeLevel: 'Grade 6 - St. Therese',
-    balance: 450.0,
-    dailyLimit: 120.0,
-    spentToday: 40.0,
-  },
-  {
-    id: 102,
-    name: 'Maria Clara Santos',
-    gradeLevel: 'Grade 10 - St. Francis',
-    balance: 620.0,
-    dailyLimit: 200.0,
-    spentToday: 0.0,
-  },
-  {
-    id: 103,
-    name: 'Brother Mark Loyola',
-    gradeLevel: 'Faculty / Staff',
-    balance: 1200.0,
-    dailyLimit: 500.0,
-    spentToday: 85.0,
-  },
-];
-
-export default function POSIndex() {
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
-  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState<boolean>(false);
-  const [isHeldOrdersModalOpen, setIsHeldOrdersModalOpen] = useState<boolean>(false);
-  
-  const [selectedCustomer, setSelectedCustomer] = useState<StudentCustomer | null>(mockStudents[0]);
-  const [discountPercentage, setDiscountPercentage] = useState<number>(0);
-  const [heldOrders, setHeldOrders] = useState<{ id: string; items: CartItem[]; customer: StudentCustomer | null; time: string }[]>([]);
-
-  // Item additions & quantities
-  const handleAddToCart = (product: Product) => {
-    setCartItems(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
-      if (existing) {
-        return prev.map(item => 
-          item.product.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 } 
-            : item
-        );
-      }
-      return [...prev, { product, quantity: 1 }];
-    });
-  };
-
-  const handleUpdateQuantity = (productId: number, quantity: number) => {
-    setCartItems(prev => 
-      prev.map(item => 
-        item.product.id === productId ? { ...item, quantity } : item
-      )
-    );
-  };
-
-  const handleRemoveItem = (productId: number) => {
-    setCartItems(prev => prev.filter(item => item.product.id !== productId));
-  };
-
-  const handleClearCart = () => {
-    setCartItems([]);
-  };
-
-  // Hold / Recall Order
-  const handleHoldOrder = () => {
-    if (cartItems.length === 0) return;
-    const newHold = {
-      id: `HOLD-${Date.now().toString().slice(-4)}`,
-      items: [...cartItems],
-      customer: selectedCustomer,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setHeldOrders(prev => [newHold, ...prev]);
-    setCartItems([]);
-  };
-
-  const handleRecallOrder = (holdId: string) => {
-    const held = heldOrders.find(h => h.id === holdId);
-    if (held) {
-      setCartItems(held.items);
-      setSelectedCustomer(held.customer);
-      setHeldOrders(prev => prev.filter(h => h.id !== holdId));
-      setIsHeldOrdersModalOpen(false);
-    }
-  };
-
-  // Discount Toggle
-  const handleApplyDiscount = () => {
-    setDiscountPercentage(prev => (prev === 0 ? 10 : 0));
-  };
-
-  const subtotal = useMemo(() => {
-    return cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
-  }, [cartItems]);
-
-  const totalPayable = useMemo(() => {
-    const discount = (subtotal * discountPercentage) / 100;
-    return Math.max(0, subtotal - discount);
-  }, [subtotal, discountPercentage]);
-
-  const cartItemIds = useMemo(() => {
-    return new Set(cartItems.map(item => item.product.id));
-  }, [cartItems]);
-
-  return (
-    <POSLayout
-      searchQuery={searchQuery}
-      onSearchChange={setSearchQuery}
-      heldOrdersCount={heldOrders.length}
-      onHoldOrdersClick={() => setIsHeldOrdersModalOpen(true)}
-      cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
-    >
-      <div className="flex h-full w-full overflow-hidden">
-        {/* Product Menu Grid */}
-        <div className="flex-1 min-w-0 h-full">
-          <ProductGrid 
-            onAddToCart={handleAddToCart}
-            searchQuery={searchQuery}
-            cartItemIds={cartItemIds}
-          />
-        </div>
-
-        {/* Active Cart Drawer */}
-        <div className="flex-shrink-0 h-full">
-          <ActiveCart 
-            items={cartItems}
-            onUpdateQuantity={handleUpdateQuantity}
-            onRemoveItem={handleRemoveItem}
-            onClearCart={handleClearCart}
-            onCheckout={() => setIsCheckoutModalOpen(true)}
-            onHoldOrder={handleHoldOrder}
-            selectedCustomer={selectedCustomer}
-            onSelectCustomerClick={() => setIsCustomerModalOpen(true)}
-            discountPercentage={discountPercentage}
-            onApplyDiscount={handleApplyDiscount}
-          />
-        </div>
-      </div>
-
-      {/* Checkout Payment Dialog */}
-      <CheckoutModal 
-        isOpen={isCheckoutModalOpen}
-        onClose={() => setIsCheckoutModalOpen(false)}
-        totalAmount={totalPayable}
-        selectedCustomer={selectedCustomer}
-        cartItems={cartItems}
-        onSuccess={() => setCartItems([])}
-      />
-
-      {/* Student / Customer Selector Dialog */}
-      <Dialog open={isCustomerModalOpen} onOpenChange={setIsCustomerModalOpen}>
-        <DialogContent className="sm:max-w-[440px] rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-800">
-              <Users size={18} className="text-[#5c1516]" />
-              Select Student or Staff Account
-            </DialogTitle>
-            <DialogDescription className="text-xs text-slate-500">
-              Link an RFID pupil card to enforce daily cafeteria limits & credit debits.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2.5 my-2">
-            {/* Walk-in Option */}
-            <div
-              onClick={() => {
-                setSelectedCustomer(null);
-                setIsCustomerModalOpen(false);
-              }}
-              className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                selectedCustomer === null 
-                  ? 'border-[#5c1516] bg-red-50/50' 
-                  : 'border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <div>
-                <span className="font-bold text-xs text-slate-800">Walk-in Customer</span>
-                <p className="text-[11px] text-slate-400">Regular cash payment &bull; No limit checking</p>
-              </div>
-              {selectedCustomer === null && (
-                <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
-              )}
-            </div>
-
-            {/* Mock Students */}
-            {mockStudents.map(student => (
-              <div
-                key={student.id}
-                onClick={() => {
-                  setSelectedCustomer(student);
-                  setIsCustomerModalOpen(false);
-                }}
-                className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                  selectedCustomer?.id === student.id 
-                    ? 'border-[#5c1516] bg-red-50/50' 
-                    : 'border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-slate-800">{student.name}</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-300">
-                      {student.gradeLevel}
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Balance: <strong className="text-emerald-700">{formatMoney(student.balance)}</strong> &bull; Daily Limit: {formatMoney(student.dailyLimit)}
-                  </p>
-                </div>
-                {selectedCustomer?.id === student.id && (
-                  <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
-                )}
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Held Orders Recall Dialog */}
-      <Dialog open={isHeldOrdersModalOpen} onOpenChange={setIsHeldOrdersModalOpen}>
-        <DialogContent className="sm:max-w-[460px] rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-800">
-              <Clock size={18} className="text-amber-600" />
-              Held Orders Recall
-            </DialogTitle>
-            <DialogDescription className="text-xs text-slate-500">
-              Resume an order parked for student balance checking or waiting.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2.5 my-2 max-h-72 overflow-y-auto">
-            {heldOrders.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                No active orders on hold.
-              </div>
-            ) : (
-              heldOrders.map(hold => {
-                const holdTotal = hold.items.reduce((s, i) => s + (i.product.price * i.quantity), 0);
-                return (
-                  <div 
-                    key={hold.id}
-                    className="p-3 rounded-xl border border-slate-200 hover:border-amber-400 bg-slate-50/60 flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-xs text-slate-800">{hold.id}</span>
-                        <span className="text-[10px] text-slate-400">{hold.time}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        {hold.customer ? hold.customer.name : 'Walk-in'} &bull; {hold.items.length} items &bull; <strong className="text-[#5c1516]">{formatMoney(holdTotal)}</strong>
-                      </p>
-                    </div>
-                    <Button 
-                      size="sm" 
-                      onClick={() => handleRecallOrder(hold.id)}
-                      className="bg-[#5c1516] hover:bg-[#7a1420] text-white text-xs h-8 px-3 rounded-lg"
-                    >
-                      Resume
-                    </Button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </POSLayout>
   );
 }
 </file>
@@ -15076,6 +14642,14 @@ class Transaction extends Model implements Auditable
     {
         return $this->hasMany(TransactionDetail::class);
     }
+
+    /**
+     * Relationship alias for transaction details.
+     */
+    public function transactionDetails(): HasMany
+    {
+        return $this->details();
+    }
 }
 </file>
 
@@ -15807,121 +15381,17 @@ const RegisteredUserController = { create, store }
 export default RegisteredUserController
 </file>
 
-<file path="resources/js/actions/App/Http/Controllers/ProfileController.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/profile',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
+<file path="resources/js/actions/App/Http/Controllers/index.ts">
+import PosCheckoutController from './PosCheckoutController'
+import ProfileController from './ProfileController'
+import Auth from './Auth'
+const Controllers = {
+    PosCheckoutController: Object.assign(PosCheckoutController, PosCheckoutController),
+ProfileController: Object.assign(ProfileController, ProfileController),
+Auth: Object.assign(Auth, Auth),
 }
 
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-update.definition = {
-    methods: ["patch"],
-    url: '/profile',
-} satisfies RouteDefinition<["patch"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-update.url = (options?: RouteQueryOptions) => {
-    return update.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-
-destroy.definition = {
-    methods: ["delete"],
-    url: '/profile',
-} satisfies RouteDefinition<["delete"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-destroy.url = (options?: RouteQueryOptions) => {
-    return destroy.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-const ProfileController = { edit, update, destroy }
-
-export default ProfileController
+export default Controllers
 </file>
 
 <file path="resources/js/Components/ApplicationLogo.tsx">
@@ -15941,6 +15411,99 @@ export default function ApplicationLogo({
             {...props}
         />
     );
+}
+</file>
+
+<file path="resources/js/Hooks/usePOSCart.ts">
+import { useState, useMemo } from 'react';
+
+export interface CartItem {
+  product: {
+    id: number;
+    name?: string;
+    price: number;
+    image?: string;
+    category?: string;
+    stock_quantity?: number;
+    [key: string]: any;
+  };
+  quantity: number;
+}
+
+export interface CheckoutCartItemPayload {
+  product_id: number;
+  quantity: number;
+  unit_price: number;
+}
+
+/**
+ * Format cart items into the shape strictly required by PosCheckoutRequest
+ * (product_id, quantity, unit_price).
+ */
+export function formatCartForCheckout(
+  cartItems: Array<{ product: { id: number | string; price: number | string }; quantity: number }>
+): CheckoutCartItemPayload[] {
+  return cartItems.map((item) => ({
+    product_id: Number(item.product.id),
+    quantity: Number(item.quantity),
+    unit_price: Number(item.product.price),
+  }));
+}
+
+export function usePOSCart(dailyLimit?: number) {
+  const [items, setItems] = useState<CartItem[]>([]);
+
+  const addItem = (product: any, quantity: number = 1) => {
+    setItems((prev) => {
+      const existing = prev.find((item) => item.product.id === product.id);
+      if (existing) {
+        return prev.map((item) =>
+          item.product.id === product.id
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
+        );
+      }
+      return [...prev, { product, quantity }];
+    });
+  };
+
+  const updateQuantity = (productId: number, quantity: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.product.id === productId ? { ...item, quantity } : item
+      )
+    );
+  };
+
+  const removeItem = (productId: number) => {
+    setItems((prev) => prev.filter((item) => item.product.id !== productId));
+  };
+
+  const clearCart = () => setItems([]);
+
+  const subtotal = useMemo(() => {
+    return items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  }, [items]);
+
+  const exceedsLimit = useMemo(() => {
+    return dailyLimit ? subtotal > dailyLimit : false;
+  }, [subtotal, dailyLimit]);
+
+  const getCheckoutItems = (): CheckoutCartItemPayload[] => {
+    return formatCartForCheckout(items);
+  };
+
+  return {
+    items,
+    addItem,
+    updateQuantity,
+    removeItem,
+    clearCart,
+    subtotal,
+    exceedsLimit,
+    getCheckoutItems,
+    formatForCheckout: getCheckoutItems,
+  };
 }
 </file>
 
@@ -18168,10 +17731,10 @@ export default function ProductsIndex() {
 </file>
 
 <file path="resources/js/Pages/ParentDashboard/Index.tsx">
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
-import { Student, Transaction, WeeklySpendingPoint, CategoryDistributionPoint } from './types';
+import { Student, Transaction } from './types';
 import StudentHeader from './Partials/StudentHeader';
 import QuickStatsGrid from './Partials/QuickStatsGrid';
 import OverviewTab from './Partials/OverviewTab';
@@ -18180,153 +17743,75 @@ import SpendingLimitsTab from './Partials/SpendingLimitsTab';
 import DietaryRestrictionsTab from './Partials/DietaryRestrictionsTab';
 import TopUpModal from './Partials/TopUpModal';
 import EReceiptModal from './Partials/EReceiptModal';
+import { Users } from 'lucide-react';
 
-const initialStudents: Student[] = [
-  {
-    id: 101,
-    name: 'Juan Dela Cruz',
-    gradeLevel: 'Grade 6 - St. Therese (Elementary)',
-    studentId: '2024-0012',
-    rfidUid: 'RF-882194',
-    balance: 450.0,
-    dailyLimit: 120.0,
-    spentToday: 40.0,
-    prohibitedItems: ['Carbonated Sodas', 'Instant Noodles'],
-    allergies: ['Peanuts'],
-  },
-  {
-    id: 102,
-    name: 'Maria Clara Dela Cruz',
-    gradeLevel: 'Grade 10 - St. Francis (Junior High)',
-    studentId: '2022-0451',
-    rfidUid: 'RF-882195',
-    balance: 620.0,
-    dailyLimit: 200.0,
-    spentToday: 85.0,
-    prohibitedItems: ['High-Caffeine Energy Drinks'],
-    allergies: ['Seafood / Shrimp'],
-  },
-];
+interface ParentDashboardProps {
+  students?: Student[];
+}
 
-const weeklySpendingData: WeeklySpendingPoint[] = [
-  { day: 'Mon', amount: 65, limit: 120, meals: 1, snacks: 1 },
-  { day: 'Tue', amount: 40, limit: 120, meals: 0, snacks: 2 },
-  { day: 'Wed', amount: 85, limit: 120, meals: 1, snacks: 2 },
-  { day: 'Thu', amount: 50, limit: 120, meals: 1, snacks: 0 },
-  { day: 'Fri (Today)', amount: 40, limit: 120, meals: 1, snacks: 0 },
-];
-
-const categoryDistribution: CategoryDistributionPoint[] = [
-  { name: 'Rice Meals', value: 155, color: '#5c1516' },
-  { name: 'Fresh Drinks', value: 50, color: '#008dd5' },
-  { name: 'Snacks & Sandwiches', value: 45, color: '#d38c28' },
-  { name: 'Fruits & Bakery', value: 30, color: '#10b981' },
-];
-
-const sampleTransactions: Transaction[] = [
-  {
-    id: 'TXN-8092',
-    studentId: 101,
-    dateTime: 'Today, 12:15 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Chicken Adobo Rice Bowl', qty: 1, price: 70.0, category: 'Rice Meals' },
-      { name: 'Fresh Calamansi Juice', qty: 1, price: 20.0, category: 'Beverages' },
-    ],
-    total: 40.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 450.0,
-  },
-  {
-    id: 'TXN-8071',
-    studentId: 101,
-    dateTime: 'Yesterday, 09:45 AM',
-    mealType: 'Morning Recess',
-    items: [
-      { name: 'Ham & Egg Toasted Sandwich', qty: 1, price: 35.0, category: 'Snacks & Sandwiches' },
-      { name: 'Mineral Water (500ml)', qty: 1, price: 15.0, category: 'Beverages' },
-    ],
-    total: 50.0,
-    terminal: 'Canteen Terminal #02 (Annex Canteen)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 490.0,
-  },
-  {
-    id: 'TXN-8055',
-    studentId: 101,
-    dateTime: 'Wednesday, 12:20 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Pork Sinigang with Steamed Rice', qty: 1, price: 75.0, category: 'Rice Meals' },
-      { name: 'Fresh Fruit Cup (Melon)', qty: 1, price: 35.0, category: 'Healthy' },
-    ],
-    total: 85.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 540.0,
-  },
-  {
-    id: 'TXN-8032',
-    studentId: 101,
-    dateTime: 'Tuesday, 03:30 PM',
-    mealType: 'Afternoon Snack',
-    items: [
-      { name: 'Cheese Ensaymada', qty: 1, price: 20.0, category: 'Bakery' },
-      { name: 'Dutch Chocolate Milk', qty: 1, price: 20.0, category: 'Beverages' },
-    ],
-    total: 40.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 625.0,
-  },
-  {
-    id: 'TXN-8010',
-    studentId: 101,
-    dateTime: 'Monday, 12:10 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Sweet Style Spaghetti with Cheese', qty: 1, price: 50.0, category: 'Rice Meals' },
-      { name: 'Purified Water (500ml)', qty: 1, price: 15.0, category: 'Beverages' },
-    ],
-    total: 65.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 665.0,
-  },
-];
-
-export default function ParentDashboardIndex() {
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-  const [selectedStudentId, setSelectedStudentId] = useState<number>(101);
+export default function ParentDashboardIndex({ students = [] }: ParentDashboardProps) {
+  const [selectedStudentId, setSelectedStudentId] = useState<number>(students[0]?.id ?? 0);
   const [activeTab, setActiveTab] = useState<string>('overview');
 
   // Modals
   const [isTopUpOpen, setIsTopUpOpen] = useState<boolean>(false);
   const [selectedReceipt, setSelectedReceipt] = useState<Transaction | null>(null);
 
-  const currentStudent = useMemo(() => {
-    return students.find(s => s.id === selectedStudentId) || students[0];
+  // Synchronize selected child if students array changes
+  useEffect(() => {
+    if (students.length > 0 && !students.some(s => s.id === selectedStudentId)) {
+      setSelectedStudentId(students[0].id);
+    }
   }, [students, selectedStudentId]);
 
-  // Handlers
+  const currentStudent = useMemo(() => {
+    return students.find(s => s.id === selectedStudentId) || students[0] || null;
+  }, [students, selectedStudentId]);
+
+  const studentTransactions = useMemo(() => {
+    return currentStudent?.transactions || [];
+  }, [currentStudent]);
+
+  const weeklyTotal = useMemo(() => {
+    if (currentStudent?.weeklySpent !== undefined) {
+      return currentStudent.weeklySpent;
+    }
+    return studentTransactions.reduce((acc, t) => acc + t.total, 0);
+  }, [currentStudent, studentTransactions]);
+
+  const todayTransaction = useMemo(() => {
+    return studentTransactions.find(t => t.dateTime.toLowerCase().includes('today')) || studentTransactions[0] || null;
+  }, [studentTransactions]);
+
+  // Handle local optimistic balance top-up display
   const handleTopUpConfirm = (amount: number) => {
-    setStudents(prev => prev.map(s => {
-      if (s.id === selectedStudentId) {
-        return { ...s, balance: s.balance + amount };
-      }
-      return s;
-    }));
+    if (currentStudent) {
+      currentStudent.balance += amount;
+    }
   };
 
-  const handleSaveDailyLimit = (newLimit: number) => {
-    setStudents(prev => prev.map(s => {
-      if (s.id === selectedStudentId) {
-        return { ...s, dailyLimit: newLimit };
-      }
-      return s;
-    }));
-  };
+  // Graceful empty state when parent has no linked student accounts
+  if (!currentStudent || students.length === 0) {
+    return (
+      <AdminLayout 
+        portal="parent" 
+        activeNav={activeTab} 
+        onNavigate={setActiveTab}
+      >
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-12 text-center shadow-xs max-w-2xl mx-auto my-8">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-[#5c1516] flex items-center justify-center mx-auto mb-4 shadow-2xs">
+            <Users size={32} />
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">
+            No Linked Student Accounts Found
+          </h2>
+          <p className="text-xs text-slate-500 max-w-md mx-auto mt-2 leading-relaxed">
+            There are currently no student accounts linked to your parent portal profile. Please contact the school canteen cashier or registrar with your child's Student ID to link their RFID tag.
+          </p>
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout 
@@ -18346,7 +17831,7 @@ export default function ParentDashboardIndex() {
       <QuickStatsGrid
         student={currentStudent}
         onTopUpClick={() => setIsTopUpOpen(true)}
-        weeklyTotal={280.0}
+        weeklyTotal={weeklyTotal}
       />
 
       {/* 3. Main Navigation Tabs */}
@@ -18370,9 +17855,7 @@ export default function ParentDashboardIndex() {
         <TabsContent value="overview" className="m-0">
           <OverviewTab
             student={currentStudent}
-            weeklySpendingData={weeklySpendingData}
-            categoryDistribution={categoryDistribution}
-            todayTransaction={sampleTransactions[0]}
+            todayTransaction={todayTransaction}
             onViewReceipt={setSelectedReceipt}
           />
         </TabsContent>
@@ -18380,7 +17863,7 @@ export default function ParentDashboardIndex() {
         {/* Tab 2: Meal History */}
         <TabsContent value="history" className="m-0">
           <MealHistoryTab
-            transactions={sampleTransactions}
+            transactions={studentTransactions}
             onViewReceipt={setSelectedReceipt}
           />
         </TabsContent>
@@ -18389,7 +17872,6 @@ export default function ParentDashboardIndex() {
         <TabsContent value="limits" className="m-0">
           <SpendingLimitsTab
             student={currentStudent}
-            onSaveLimit={handleSaveDailyLimit}
           />
         </TabsContent>
 
@@ -18416,6 +17898,835 @@ export default function ParentDashboardIndex() {
         student={currentStudent}
       />
     </AdminLayout>
+  );
+}
+</file>
+
+<file path="resources/js/Pages/POS/Partials/CheckoutModal.tsx">
+import React, { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/Components/ui/dialog";
+import { Button } from "@/Components/ui/button";
+import { Input } from "@/Components/ui/input";
+import { Badge } from "@/Components/ui/badge";
+import { formatMoney } from '@/lib/formatters';
+import {
+  CreditCard,
+  Banknote,
+  QrCode,
+  CheckCircle2,
+  User,
+  Printer,
+  AlertTriangle,
+  Radio,
+  Loader2,
+  Check,
+} from 'lucide-react';
+import { StudentCustomer, CartItem } from './ActiveCart';
+import { formatCartForCheckout } from '@/Hooks/usePOSCart';
+import { checkout } from '@/routes/pos';
+import axios from 'axios';
+
+interface CheckoutModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  totalAmount: number;
+  selectedCustomer: StudentCustomer | null;
+  cartItems?: CartItem[];
+  onSuccess: (receipt?: any) => void;
+}
+
+export default function CheckoutModal({
+  isOpen,
+  onClose,
+  totalAmount,
+  selectedCustomer,
+  cartItems = [],
+  onSuccess,
+}: CheckoutModalProps) {
+  const [paymentMethod, setPaymentMethod] = useState<'rfid' | 'cash' | 'qr'>('cash');
+  const [cashTendered, setCashTendered] = useState<number>(totalAmount);
+  const [rfidUid, setRfidUid] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successReceipt, setSuccessReceipt] = useState<any | null>(null);
+  const [scanPulse, setScanPulse] = useState<boolean>(false);
+
+  // Quick cash denominations in Philippine Peso
+  const denominations = [50, 100, 200, 500, 1000];
+  const change = Math.max(0, cashTendered - totalAmount);
+
+  // Synchronize initial state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCashTendered(totalAmount);
+      setErrorMessage(null);
+      setSuccessReceipt(null);
+      setIsSubmitting(false);
+    } else {
+      setRfidUid('');
+      setErrorMessage(null);
+      setSuccessReceipt(null);
+      setIsSubmitting(false);
+    }
+  }, [isOpen, totalAmount]);
+
+  // RFID Scanner Event Listener (USB Hardware Keyboard Emulator)
+  useEffect(() => {
+    if (!isOpen || paymentMethod !== 'rfid' || successReceipt) return;
+
+    let buffer = '';
+    let lastTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isManualRfid = target?.getAttribute('data-manual-rfid') === 'true';
+
+      // If cashier is typing manually in the designated RFID field, skip global key capture
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName) && isManualRfid) {
+        return;
+      }
+
+      const now = Date.now();
+      // Hardware scanner sends keys rapidly (< 120ms intervals)
+      if (now - lastTime > 150) {
+        buffer = '';
+      }
+      lastTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.trim().length >= 3) {
+          e.preventDefault();
+          const scanned = buffer.trim();
+          setRfidUid(scanned);
+          setErrorMessage(null);
+          setScanPulse(true);
+          setTimeout(() => setScanPulse(false), 1500);
+          buffer = '';
+        }
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, paymentMethod, successReceipt]);
+
+  // Handle Checkout Submission
+  const handleProcess = async () => {
+    if (isSubmitting) return;
+    setErrorMessage(null);
+
+    // Cash Tender Validation
+    if (paymentMethod === 'cash' && cashTendered < totalAmount) {
+      setErrorMessage('Amount tendered is less than the total payable amount.');
+      return;
+    }
+
+    // Cashless RFID Validation
+    if (paymentMethod === 'rfid' && !rfidUid.trim()) {
+      setErrorMessage('Please tap or enter a student RFID card before confirming checkout.');
+      return;
+    }
+
+    if (!cartItems || cartItems.length === 0) {
+      setErrorMessage('Cart is empty. Add products before proceeding.');
+      return;
+    }
+
+    const formattedItems = formatCartForCheckout(cartItems);
+    if (formattedItems.length === 0) {
+      setErrorMessage('No valid cart items to checkout.');
+      return;
+    }
+
+    const payload = {
+      payment_method: paymentMethod === 'rfid' ? 'cashless' : 'cash',
+      rfid_uid: paymentMethod === 'rfid' ? rfidUid.trim() : null,
+      amount_tendered: paymentMethod === 'rfid' ? totalAmount : cashTendered,
+      items: formattedItems,
+    };
+
+    setIsSubmitting(true);
+
+    try {
+      const endpoint = checkout.url();
+      const response = await axios.post(endpoint, payload, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (response.status === 201 || response.status === 200) {
+        const receipt = response.data?.receipt;
+        setSuccessReceipt(receipt);
+        onSuccess(receipt);
+      }
+    } catch (err: any) {
+      let message = 'Transaction could not be processed. Please try again.';
+      if (err.response?.data?.message) {
+        message = err.response.data.message;
+      } else if (err.response?.data?.errors) {
+        const firstKey = Object.keys(err.response.data.errors)[0];
+        message = err.response.data.errors[firstKey][0];
+      } else if (err.message) {
+        message = err.message;
+      }
+      setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden rounded-2xl border-0 shadow-2xl bg-white">
+        {/* Header */}
+        <div className="bg-[#5c1516] text-white p-6 relative">
+          <DialogHeader className="text-left space-y-1">
+            <div className="flex items-center justify-between">
+              <Badge className="bg-amber-400 text-amber-950 font-bold border-0 text-[10px] px-2 py-0.5">
+                PAYMENT CHECKOUT
+              </Badge>
+              {selectedCustomer && (
+                <div className="flex items-center gap-1.5 text-xs text-amber-200">
+                  <User size={13} />
+                  <span>{selectedCustomer.name}</span>
+                </div>
+              )}
+            </div>
+            <DialogTitle className="text-xl font-extrabold text-white tracking-tight">
+              Settle Order Payment
+            </DialogTitle>
+            <DialogDescription className="text-amber-100/80 text-xs">
+              Select cash payment or tap student RFID card to debit balance.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Amount Due Big Display */}
+          <div className="mt-4 p-4 rounded-xl bg-white/10 backdrop-blur-md border border-white/15 flex items-baseline justify-between">
+            <span className="text-xs uppercase font-bold tracking-wider text-amber-200">Total Payable</span>
+            <span className="text-3xl font-black text-amber-300 tracking-tight">
+              {formatMoney(totalAmount)}
+            </span>
+          </div>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-6 space-y-4">
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="p-3.5 bg-red-50 border border-red-200/80 rounded-xl flex items-start gap-2.5 text-red-900 animate-in fade-in duration-200">
+              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-0.5">
+                <span className="font-bold block">Payment Blocked</span>
+                <p className="text-red-700">{errorMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {successReceipt ? (
+            /* Success Receipt Display */
+            <div className="py-4 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-200">
+              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center animate-bounce">
+                <CheckCircle2 size={36} />
+              </div>
+              <div className="space-y-0.5">
+                <h4 className="font-extrabold text-slate-800 text-lg">Transaction Complete!</h4>
+                <p className="text-xs text-slate-500">Official canteen receipt registered.</p>
+              </div>
+
+              {/* Receipt Summary Card */}
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-semibold">Receipt Number:</span>
+                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    {successReceipt.receipt_number}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Payment Mode:</span>
+                  <span className="uppercase font-bold text-[#5c1516]">{successReceipt.payment_method}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-semibold">Total Paid:</span>
+                  <span className="font-bold text-slate-900">{formatMoney(successReceipt.total_amount)}</span>
+                </div>
+                {successReceipt.student && (
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 font-semibold">Remaining Balance:</span>
+                    <span className="font-bold text-emerald-700">
+                      {formatMoney(successReceipt.student.remaining_balance)}
+                    </span>
+                  </div>
+                )}
+                {successReceipt.change_amount > 0 && (
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
+                    <span className="text-slate-500 font-semibold">Change Returned:</span>
+                    <span className="font-bold text-emerald-700">
+                      {formatMoney(successReceipt.change_amount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                onClick={onClose}
+                className="w-full bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 rounded-xl shadow-md"
+              >
+                Close & Return to POS
+              </Button>
+            </div>
+          ) : (
+            <>
+              {/* Payment Methods Selector */}
+              <div>
+                <label className="text-xs font-bold text-slate-600 mb-2 block uppercase tracking-wider">
+                  Payment Method
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('cash');
+                      setErrorMessage(null);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
+                      paymentMethod === 'cash'
+                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    <Banknote size={18} />
+                    <span>Cash</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('rfid');
+                      setErrorMessage(null);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
+                      paymentMethod === 'rfid'
+                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    <CreditCard size={18} />
+                    <span>Student RFID</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      setPaymentMethod('qr');
+                      setErrorMessage(null);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border font-bold text-xs transition-all ${
+                      paymentMethod === 'qr'
+                        ? 'border-[#5c1516] bg-red-50/50 text-[#5c1516] ring-1 ring-[#5c1516]'
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    <QrCode size={18} />
+                    <span>GCash / Maya</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Conditional Method Body */}
+              {paymentMethod === 'cash' && (
+                <div className="space-y-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>Cash Received:</span>
+                    <Input
+                      type="number"
+                      disabled={isSubmitting}
+                      value={cashTendered}
+                      onChange={(e) => {
+                        setCashTendered(Number(e.target.value));
+                        if (errorMessage) setErrorMessage(null);
+                      }}
+                      className="w-32 h-9 text-right font-bold text-base bg-white"
+                    />
+                  </div>
+
+                  {/* Fast Denomination Buttons */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isSubmitting}
+                      onClick={() => setCashTendered(totalAmount)}
+                      className="h-7 text-[11px] font-semibold bg-white border-slate-200"
+                    >
+                      Exact (₱{totalAmount})
+                    </Button>
+                    {denominations
+                      .filter((d) => d >= totalAmount)
+                      .map((d) => (
+                        <Button
+                          key={d}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isSubmitting}
+                          onClick={() => setCashTendered(d)}
+                          className="h-7 text-[11px] font-semibold bg-white border-slate-200"
+                        >
+                          ₱{d}
+                        </Button>
+                      ))}
+                  </div>
+
+                  {/* Change Computation */}
+                  <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-600">Change Due:</span>
+                    <span className="text-base font-extrabold text-emerald-600">
+                      {formatMoney(change)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'rfid' && (
+                <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-3">
+                  <div className="flex flex-col items-center text-center space-y-1.5">
+                    <div
+                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+                        rfidUid
+                          ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500'
+                          : scanPulse
+                          ? 'bg-amber-200 text-amber-900 ring-4 ring-amber-300'
+                          : 'bg-amber-100 text-amber-800 animate-pulse'
+                      }`}
+                    >
+                      {rfidUid ? <Check size={22} /> : <CreditCard size={22} />}
+                    </div>
+
+                    <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                      {rfidUid ? (
+                        <>
+                          <span className="text-emerald-700">Card Captured</span>
+                        </>
+                      ) : (
+                        <>
+                          <Radio size={14} className="animate-spin text-amber-600" />
+                          <span>Tap RFID Card to Terminal Reader</span>
+                        </>
+                      )}
+                    </h5>
+
+                    <p className="text-[11px] text-slate-500 max-w-xs">
+                      {selectedCustomer
+                        ? `Account: ${selectedCustomer.name} (Balance: ${formatMoney(selectedCustomer.balance)})`
+                        : 'Scanner acts automatically as keyboard input.'}
+                    </p>
+                  </div>
+
+                  {/* RFID Input Field (Keyboard Scanner or Manual Entry) */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        data-manual-rfid="true"
+                        type="text"
+                        placeholder="Waiting for RFID tap or enter UID..."
+                        value={rfidUid}
+                        disabled={isSubmitting}
+                        onChange={(e) => {
+                          setRfidUid(e.target.value);
+                          if (errorMessage) setErrorMessage(null);
+                        }}
+                        className={`font-mono text-center font-bold tracking-wider text-xs h-9 bg-white transition-all ${
+                          rfidUid ? 'border-emerald-500 ring-1 ring-emerald-500' : ''
+                        }`}
+                      />
+                      {rfidUid && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isSubmitting}
+                          onClick={() => setRfidUid('')}
+                          className="h-9 px-2 text-[11px] text-slate-400 hover:text-slate-600"
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                    {rfidUid && (
+                      <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                        <CheckCircle2 size={12} />
+                        <span>Ready to deduct {formatMoney(totalAmount)} from card</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'qr' && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col items-center text-center space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <QrCode size={22} />
+                  </div>
+                  <h5 className="font-bold text-xs text-slate-800">GCash / Maya Dynamic QR</h5>
+                  <p className="text-[11px] text-slate-500">
+                    Digital QR gateway integration is in progress. Please use Cash or Student RFID.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!successReceipt && (
+          <DialogFooter className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between sm:justify-between gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={onClose}
+              className="text-slate-500 text-xs"
+            >
+              Back to Cart
+            </Button>
+            <Button
+              onClick={handleProcess}
+              disabled={
+                isSubmitting ||
+                (paymentMethod === 'cash' && cashTendered < totalAmount) ||
+                (paymentMethod === 'rfid' && !rfidUid.trim()) ||
+                paymentMethod === 'qr'
+              }
+              className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Printer size={15} />
+                  Confirm & Print Receipt
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+</file>
+
+<file path="resources/js/Pages/POS/Index.tsx">
+import React, { useState, useMemo } from 'react';
+import POSLayout from '@/Layouts/POSLayout';
+import ProductGrid, { Product } from './Partials/ProductGrid';
+import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
+import CheckoutModal from './Partials/CheckoutModal';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/Components/ui/dialog";
+import { Button } from "@/Components/ui/button";
+import { Badge } from "@/Components/ui/badge";
+import { formatMoney } from '@/lib/formatters';
+import { UserCheck, Users, Clock, AlertCircle } from 'lucide-react';
+
+const mockStudents: StudentCustomer[] = [
+  {
+    id: 101,
+    name: 'Juan Dela Cruz',
+    gradeLevel: 'Grade 6 - St. Therese',
+    balance: 450.0,
+    dailyLimit: 120.0,
+    spentToday: 40.0,
+  },
+  {
+    id: 102,
+    name: 'Maria Clara Santos',
+    gradeLevel: 'Grade 10 - St. Francis',
+    balance: 620.0,
+    dailyLimit: 200.0,
+    spentToday: 0.0,
+  },
+  {
+    id: 103,
+    name: 'Brother Mark Loyola',
+    gradeLevel: 'Faculty / Staff',
+    balance: 1200.0,
+    dailyLimit: 500.0,
+    spentToday: 85.0,
+  },
+];
+
+export default function POSIndex() {
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState<boolean>(false);
+  const [isHeldOrdersModalOpen, setIsHeldOrdersModalOpen] = useState<boolean>(false);
+  
+  const [selectedCustomer, setSelectedCustomer] = useState<StudentCustomer | null>(mockStudents[0]);
+  const [discountPercentage, setDiscountPercentage] = useState<number>(0);
+  const [heldOrders, setHeldOrders] = useState<{ id: string; items: CartItem[]; customer: StudentCustomer | null; time: string }[]>([]);
+
+  // Item additions & quantities
+  const handleAddToCart = (product: Product) => {
+    setCartItems(prev => {
+      const existing = prev.find(item => item.product.id === product.id);
+      if (existing) {
+        return prev.map(item => 
+          item.product.id === product.id 
+            ? { ...item, quantity: item.quantity + 1 } 
+            : item
+        );
+      }
+      return [...prev, { product, quantity: 1 }];
+    });
+  };
+
+  const handleUpdateQuantity = (productId: number, quantity: number) => {
+    setCartItems(prev => 
+      prev.map(item => 
+        item.product.id === productId ? { ...item, quantity } : item
+      )
+    );
+  };
+
+  const handleRemoveItem = (productId: number) => {
+    setCartItems(prev => prev.filter(item => item.product.id !== productId));
+  };
+
+  const handleClearCart = () => {
+    setCartItems([]);
+  };
+
+  // Hold / Recall Order
+  const handleHoldOrder = () => {
+    if (cartItems.length === 0) return;
+    const newHold = {
+      id: `HOLD-${Date.now().toString().slice(-4)}`,
+      items: [...cartItems],
+      customer: selectedCustomer,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setHeldOrders(prev => [newHold, ...prev]);
+    setCartItems([]);
+  };
+
+  const handleRecallOrder = (holdId: string) => {
+    const held = heldOrders.find(h => h.id === holdId);
+    if (held) {
+      setCartItems(held.items);
+      setSelectedCustomer(held.customer);
+      setHeldOrders(prev => prev.filter(h => h.id !== holdId));
+      setIsHeldOrdersModalOpen(false);
+    }
+  };
+
+  // Discount Toggle
+  const handleApplyDiscount = () => {
+    setDiscountPercentage(prev => (prev === 0 ? 10 : 0));
+  };
+
+  const subtotal = useMemo(() => {
+    return cartItems.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  }, [cartItems]);
+
+  const totalPayable = useMemo(() => {
+    const discount = (subtotal * discountPercentage) / 100;
+    return Math.max(0, subtotal - discount);
+  }, [subtotal, discountPercentage]);
+
+  const cartItemIds = useMemo(() => {
+    return new Set(cartItems.map(item => item.product.id));
+  }, [cartItems]);
+
+  return (
+    <POSLayout
+      searchQuery={searchQuery}
+      onSearchChange={setSearchQuery}
+      heldOrdersCount={heldOrders.length}
+      onHoldOrdersClick={() => setIsHeldOrdersModalOpen(true)}
+      cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
+    >
+      <div className="flex h-full w-full overflow-hidden">
+        {/* Product Menu Grid */}
+        <div className="flex-1 min-w-0 h-full">
+          <ProductGrid 
+            onAddToCart={handleAddToCart}
+            searchQuery={searchQuery}
+            cartItemIds={cartItemIds}
+          />
+        </div>
+
+        {/* Active Cart Drawer */}
+        <div className="flex-shrink-0 h-full">
+          <ActiveCart 
+            items={cartItems}
+            onUpdateQuantity={handleUpdateQuantity}
+            onRemoveItem={handleRemoveItem}
+            onClearCart={handleClearCart}
+            onCheckout={() => setIsCheckoutModalOpen(true)}
+            onHoldOrder={handleHoldOrder}
+            selectedCustomer={selectedCustomer}
+            onSelectCustomerClick={() => setIsCustomerModalOpen(true)}
+            discountPercentage={discountPercentage}
+            onApplyDiscount={handleApplyDiscount}
+          />
+        </div>
+      </div>
+
+      {/* Checkout Payment Dialog */}
+      <CheckoutModal 
+        isOpen={isCheckoutModalOpen}
+        onClose={() => setIsCheckoutModalOpen(false)}
+        totalAmount={totalPayable}
+        selectedCustomer={selectedCustomer}
+        cartItems={cartItems}
+        onSuccess={() => setCartItems([])}
+      />
+
+      {/* Student / Customer Selector Dialog */}
+      <Dialog open={isCustomerModalOpen} onOpenChange={setIsCustomerModalOpen}>
+        <DialogContent className="sm:max-w-[440px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800">
+              <Users size={18} className="text-[#5c1516]" />
+              Select Student or Staff Account
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Link an RFID pupil card to enforce daily cafeteria limits & credit debits.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2.5 my-2">
+            {/* Walk-in Option */}
+            <div
+              onClick={() => {
+                setSelectedCustomer(null);
+                setIsCustomerModalOpen(false);
+              }}
+              className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                selectedCustomer === null 
+                  ? 'border-[#5c1516] bg-red-50/50' 
+                  : 'border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <div>
+                <span className="font-bold text-xs text-slate-800">Walk-in Customer</span>
+                <p className="text-[11px] text-slate-400">Regular cash payment &bull; No limit checking</p>
+              </div>
+              {selectedCustomer === null && (
+                <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
+              )}
+            </div>
+
+            {/* Mock Students */}
+            {mockStudents.map(student => (
+              <div
+                key={student.id}
+                onClick={() => {
+                  setSelectedCustomer(student);
+                  setIsCustomerModalOpen(false);
+                }}
+                className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                  selectedCustomer?.id === student.id 
+                    ? 'border-[#5c1516] bg-red-50/50' 
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-slate-800">{student.name}</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-300">
+                      {student.gradeLevel}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Balance: <strong className="text-emerald-700">{formatMoney(student.balance)}</strong> &bull; Daily Limit: {formatMoney(student.dailyLimit)}
+                  </p>
+                </div>
+                {selectedCustomer?.id === student.id && (
+                  <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
+                )}
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Held Orders Recall Dialog */}
+      <Dialog open={isHeldOrdersModalOpen} onOpenChange={setIsHeldOrdersModalOpen}>
+        <DialogContent className="sm:max-w-[460px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800">
+              <Clock size={18} className="text-amber-600" />
+              Held Orders Recall
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Resume an order parked for student balance checking or waiting.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2.5 my-2 max-h-72 overflow-y-auto">
+            {heldOrders.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                No active orders on hold.
+              </div>
+            ) : (
+              heldOrders.map(hold => {
+                const holdTotal = hold.items.reduce((s, i) => s + (i.product.price * i.quantity), 0);
+                return (
+                  <div 
+                    key={hold.id}
+                    className="p-3 rounded-xl border border-slate-200 hover:border-amber-400 bg-slate-50/60 flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-slate-800">{hold.id}</span>
+                        <span className="text-[10px] text-slate-400">{hold.time}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {hold.customer ? hold.customer.name : 'Walk-in'} &bull; {hold.items.length} items &bull; <strong className="text-[#5c1516]">{formatMoney(holdTotal)}</strong>
+                      </p>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      onClick={() => handleRecallOrder(hold.id)}
+                      className="bg-[#5c1516] hover:bg-[#7a1420] text-white text-xs h-8 px-3 rounded-lg"
+                    >
+                      Resume
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </POSLayout>
   );
 }
 </file>
@@ -18819,430 +19130,6 @@ export default function UpdateProfileInformation({
         </section>
     );
 }
-</file>
-
-<file path="resources/js/routes/admin/audit-logs/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
-/**
- * @see routes/web.php:66
- * @route '/admin/audit-logs'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/admin/audit-logs',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:66
- * @route '/admin/audit-logs'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:66
- * @route '/admin/audit-logs'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:66
- * @route '/admin/audit-logs'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-const auditLogs = {
-    index: Object.assign(index, index),
-}
-
-export default auditLogs
-</file>
-
-<file path="resources/js/routes/admin/products/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
-/**
- * @see routes/web.php:54
- * @route '/admin/products'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/admin/products',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:54
- * @route '/admin/products'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:54
- * @route '/admin/products'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:54
- * @route '/admin/products'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-
-/**
- * @see routes/web.php:58
- * @route '/admin/products/create'
- */
-export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-
-create.definition = {
-    methods: ["get","head"],
-    url: '/admin/products/create',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:58
- * @route '/admin/products/create'
- */
-create.url = (options?: RouteQueryOptions) => {
-    return create.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:58
- * @route '/admin/products/create'
- */
-create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: create.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:58
- * @route '/admin/products/create'
- */
-create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: create.url(options),
-    method: 'head',
-})
-
-/**
- * @see routes/web.php:62
- * @route '/admin/products/edit'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/admin/products/edit',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:62
- * @route '/admin/products/edit'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:62
- * @route '/admin/products/edit'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:62
- * @route '/admin/products/edit'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-const products = {
-    index: Object.assign(index, index),
-create: Object.assign(create, create),
-edit: Object.assign(edit, edit),
-}
-
-export default products
-</file>
-
-<file path="resources/js/routes/parent/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
- * @see routes/web.php:43
- * @route '/parent/dashboard'
- */
-export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: dashboard.url(options),
-    method: 'get',
-})
-
-dashboard.definition = {
-    methods: ["get","head"],
-    url: '/parent/dashboard',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:43
- * @route '/parent/dashboard'
- */
-dashboard.url = (options?: RouteQueryOptions) => {
-    return dashboard.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:43
- * @route '/parent/dashboard'
- */
-dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: dashboard.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:43
- * @route '/parent/dashboard'
- */
-dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: dashboard.url(options),
-    method: 'head',
-})
-const parent = {
-    dashboard: Object.assign(dashboard, dashboard),
-}
-
-export default parent
-</file>
-
-<file path="resources/js/routes/pos/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
- * @see routes/web.php:34
- * @route '/pos'
- */
-export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-
-index.definition = {
-    methods: ["get","head"],
-    url: '/pos',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
- * @see routes/web.php:34
- * @route '/pos'
- */
-index.url = (options?: RouteQueryOptions) => {
-    return index.definition.url + queryParams(options)
-}
-
-/**
- * @see routes/web.php:34
- * @route '/pos'
- */
-index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: index.url(options),
-    method: 'get',
-})
-/**
- * @see routes/web.php:34
- * @route '/pos'
- */
-index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: index.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-export const checkout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: checkout.url(options),
-    method: 'post',
-})
-
-checkout.definition = {
-    methods: ["post"],
-    url: '/pos/checkout',
-} satisfies RouteDefinition<["post"]>
-
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-checkout.url = (options?: RouteQueryOptions) => {
-    return checkout.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\PosCheckoutController::__invoke
- * @see app/Http/Controllers/PosCheckoutController.php:22
- * @route '/pos/checkout'
- */
-checkout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: checkout.url(options),
-    method: 'post',
-})
-const pos = {
-    index: Object.assign(index, index),
-checkout: Object.assign(checkout, checkout),
-}
-
-export default pos
-</file>
-
-<file path="resources/js/routes/profile/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-
-edit.definition = {
-    methods: ["get","head"],
-    url: '/profile',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.url = (options?: RouteQueryOptions) => {
-    return edit.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: edit.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\ProfileController::edit
- * @see app/Http/Controllers/ProfileController.php:20
- * @route '/profile'
- */
-edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: edit.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-update.definition = {
-    methods: ["patch"],
-    url: '/profile',
-} satisfies RouteDefinition<["patch"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-update.url = (options?: RouteQueryOptions) => {
-    return update.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::update
- * @see app/Http/Controllers/ProfileController.php:31
- * @route '/profile'
- */
-update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
-    url: update.url(options),
-    method: 'patch',
-})
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-
-destroy.definition = {
-    methods: ["delete"],
-    url: '/profile',
-} satisfies RouteDefinition<["delete"]>
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-destroy.url = (options?: RouteQueryOptions) => {
-    return destroy.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\ProfileController::destroy
- * @see app/Http/Controllers/ProfileController.php:52
- * @route '/profile'
- */
-destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
-    url: destroy.url(options),
-    method: 'delete',
-})
-const profile = {
-    edit: Object.assign(edit, edit),
-update: Object.assign(update, update),
-destroy: Object.assign(destroy, destroy),
-}
-
-export default profile
 </file>
 
 <file path="resources/js/types/global.d.ts">
@@ -20137,6 +20024,123 @@ return new class extends Migration
 }
 </file>
 
+<file path="resources/js/actions/App/Http/Controllers/ProfileController.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../../wayfinder'
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/profile',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+update.definition = {
+    methods: ["patch"],
+    url: '/profile',
+} satisfies RouteDefinition<["patch"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+update.url = (options?: RouteQueryOptions) => {
+    return update.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+
+destroy.definition = {
+    methods: ["delete"],
+    url: '/profile',
+} satisfies RouteDefinition<["delete"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+destroy.url = (options?: RouteQueryOptions) => {
+    return destroy.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+const ProfileController = { edit, update, destroy }
+
+export default ProfileController
+</file>
+
 <file path="resources/js/Layouts/AuthenticatedLayout.tsx">
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
@@ -20995,11 +20999,185 @@ export default function VerifyEmail({ status }: { status?: string }) {
 }
 </file>
 
-<file path="resources/js/routes/index.ts">
-import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../wayfinder'
+<file path="resources/js/routes/admin/audit-logs/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:23
- * @route '/dashboard'
+ * @see routes/web.php:66
+ * @route '/admin/audit-logs'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+
+index.definition = {
+    methods: ["get","head"],
+    url: '/admin/audit-logs',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:66
+ * @route '/admin/audit-logs'
+ */
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:66
+ * @route '/admin/audit-logs'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:66
+ * @route '/admin/audit-logs'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
+    method: 'head',
+})
+const auditLogs = {
+    index: Object.assign(index, index),
+}
+
+export default auditLogs
+</file>
+
+<file path="resources/js/routes/admin/products/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
+/**
+ * @see routes/web.php:54
+ * @route '/admin/products'
+ */
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+
+index.definition = {
+    methods: ["get","head"],
+    url: '/admin/products',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:54
+ * @route '/admin/products'
+ */
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:54
+ * @route '/admin/products'
+ */
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:54
+ * @route '/admin/products'
+ */
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
+    method: 'head',
+})
+
+/**
+ * @see routes/web.php:58
+ * @route '/admin/products/create'
+ */
+export const create = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+
+create.definition = {
+    methods: ["get","head"],
+    url: '/admin/products/create',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:58
+ * @route '/admin/products/create'
+ */
+create.url = (options?: RouteQueryOptions) => {
+    return create.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:58
+ * @route '/admin/products/create'
+ */
+create.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: create.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:58
+ * @route '/admin/products/create'
+ */
+create.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: create.url(options),
+    method: 'head',
+})
+
+/**
+ * @see routes/web.php:62
+ * @route '/admin/products/edit'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/admin/products/edit',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:62
+ * @route '/admin/products/edit'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:62
+ * @route '/admin/products/edit'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:62
+ * @route '/admin/products/edit'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
+    method: 'head',
+})
+const products = {
+    index: Object.assign(index, index),
+create: Object.assign(create, create),
+edit: Object.assign(edit, edit),
+}
+
+export default products
+</file>
+
+<file path="resources/js/routes/parent/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
+/**
+ * @see routes/web.php:43
+ * @route '/parent/dashboard'
  */
 export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     url: dashboard.url(options),
@@ -21008,153 +21186,241 @@ export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> =
 
 dashboard.definition = {
     methods: ["get","head"],
-    url: '/dashboard',
+    url: '/parent/dashboard',
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:23
- * @route '/dashboard'
+ * @see routes/web.php:43
+ * @route '/parent/dashboard'
  */
 dashboard.url = (options?: RouteQueryOptions) => {
     return dashboard.definition.url + queryParams(options)
 }
 
 /**
- * @see routes/web.php:23
- * @route '/dashboard'
+ * @see routes/web.php:43
+ * @route '/parent/dashboard'
  */
 dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     url: dashboard.url(options),
     method: 'get',
 })
 /**
- * @see routes/web.php:23
- * @route '/dashboard'
+ * @see routes/web.php:43
+ * @route '/parent/dashboard'
  */
 dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
     url: dashboard.url(options),
     method: 'head',
 })
+const parent = {
+    dashboard: Object.assign(dashboard, dashboard),
+}
 
+export default parent
+</file>
+
+<file path="resources/js/routes/pos/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:34
+ * @route '/pos'
  */
-export const register = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: register.url(options),
+export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
     method: 'get',
 })
 
-register.definition = {
+index.definition = {
     methods: ["get","head"],
-    url: '/register',
+    url: '/pos',
 } satisfies RouteDefinition<["get","head"]>
 
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:34
+ * @route '/pos'
  */
-register.url = (options?: RouteQueryOptions) => {
-    return register.definition.url + queryParams(options)
+index.url = (options?: RouteQueryOptions) => {
+    return index.definition.url + queryParams(options)
 }
 
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:34
+ * @route '/pos'
  */
-register.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: register.url(options),
+index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: index.url(options),
     method: 'get',
 })
 /**
-* @see \App\Http\Controllers\Auth\RegisteredUserController::register
- * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
- * @route '/register'
+ * @see routes/web.php:34
+ * @route '/pos'
  */
-register.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: register.url(options),
+index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: index.url(options),
     method: 'head',
 })
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
  */
-export const login = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: login.url(options),
-    method: 'get',
-})
-
-login.definition = {
-    methods: ["get","head"],
-    url: '/login',
-} satisfies RouteDefinition<["get","head"]>
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-login.url = (options?: RouteQueryOptions) => {
-    return login.definition.url + queryParams(options)
-}
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-login.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
-    url: login.url(options),
-    method: 'get',
-})
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
- * @route '/login'
- */
-login.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
-    url: login.url(options),
-    method: 'head',
-})
-
-/**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
- */
-export const logout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: logout.url(options),
+export const checkout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: checkout.url(options),
     method: 'post',
 })
 
-logout.definition = {
+checkout.definition = {
     methods: ["post"],
-    url: '/logout',
+    url: '/pos/checkout',
 } satisfies RouteDefinition<["post"]>
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
  */
-logout.url = (options?: RouteQueryOptions) => {
-    return logout.definition.url + queryParams(options)
+checkout.url = (options?: RouteQueryOptions) => {
+    return checkout.definition.url + queryParams(options)
 }
 
 /**
-* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
- * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
- * @route '/logout'
+* @see \App\Http\Controllers\PosCheckoutController::__invoke
+ * @see app/Http/Controllers/PosCheckoutController.php:22
+ * @route '/pos/checkout'
  */
-logout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
-    url: logout.url(options),
+checkout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: checkout.url(options),
     method: 'post',
 })
+const pos = {
+    index: Object.assign(index, index),
+checkout: Object.assign(checkout, checkout),
+}
+
+export default pos
+</file>
+
+<file path="resources/js/routes/profile/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+export const edit = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+
+edit.definition = {
+    methods: ["get","head"],
+    url: '/profile',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.url = (options?: RouteQueryOptions) => {
+    return edit.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: edit.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\ProfileController::edit
+ * @see app/Http/Controllers/ProfileController.php:20
+ * @route '/profile'
+ */
+edit.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: edit.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+export const update = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+update.definition = {
+    methods: ["patch"],
+    url: '/profile',
+} satisfies RouteDefinition<["patch"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+update.url = (options?: RouteQueryOptions) => {
+    return update.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::update
+ * @see app/Http/Controllers/ProfileController.php:31
+ * @route '/profile'
+ */
+update.patch = (options?: RouteQueryOptions): RouteDefinition<'patch'> => ({
+    url: update.url(options),
+    method: 'patch',
+})
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+export const destroy = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+
+destroy.definition = {
+    methods: ["delete"],
+    url: '/profile',
+} satisfies RouteDefinition<["delete"]>
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+destroy.url = (options?: RouteQueryOptions) => {
+    return destroy.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\ProfileController::destroy
+ * @see app/Http/Controllers/ProfileController.php:52
+ * @route '/profile'
+ */
+destroy.delete = (options?: RouteQueryOptions): RouteDefinition<'delete'> => ({
+    url: destroy.url(options),
+    method: 'delete',
+})
+const profile = {
+    edit: Object.assign(edit, edit),
+update: Object.assign(update, update),
+destroy: Object.assign(destroy, destroy),
+}
+
+export default profile
 </file>
 
 <file path="boost.json">
@@ -21667,6 +21933,168 @@ export default function Login({
 }
 </file>
 
+<file path="resources/js/routes/index.ts">
+import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../wayfinder'
+/**
+ * @see routes/web.php:23
+ * @route '/dashboard'
+ */
+export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: dashboard.url(options),
+    method: 'get',
+})
+
+dashboard.definition = {
+    methods: ["get","head"],
+    url: '/dashboard',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+ * @see routes/web.php:23
+ * @route '/dashboard'
+ */
+dashboard.url = (options?: RouteQueryOptions) => {
+    return dashboard.definition.url + queryParams(options)
+}
+
+/**
+ * @see routes/web.php:23
+ * @route '/dashboard'
+ */
+dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: dashboard.url(options),
+    method: 'get',
+})
+/**
+ * @see routes/web.php:23
+ * @route '/dashboard'
+ */
+dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: dashboard.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+export const register = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: register.url(options),
+    method: 'get',
+})
+
+register.definition = {
+    methods: ["get","head"],
+    url: '/register',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.url = (options?: RouteQueryOptions) => {
+    return register.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: register.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\RegisteredUserController::register
+ * @see app/Http/Controllers/Auth/RegisteredUserController.php:23
+ * @route '/register'
+ */
+register.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: register.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+export const login = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: login.url(options),
+    method: 'get',
+})
+
+login.definition = {
+    methods: ["get","head"],
+    url: '/login',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.url = (options?: RouteQueryOptions) => {
+    return login.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: login.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::login
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:19
+ * @route '/login'
+ */
+login.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: login.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+export const logout = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: logout.url(options),
+    method: 'post',
+})
+
+logout.definition = {
+    methods: ["post"],
+    url: '/logout',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+logout.url = (options?: RouteQueryOptions) => {
+    return logout.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\Auth\AuthenticatedSessionController::logout
+ * @see app/Http/Controllers/Auth/AuthenticatedSessionController.php:51
+ * @route '/logout'
+ */
+logout.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: logout.url(options),
+    method: 'post',
+})
+</file>
+
 <file path="CLAUDE.md">
 <laravel-boost-guidelines>
 === foundation rules ===
@@ -21955,6 +22383,8 @@ Use Wayfinder to generate TypeScript functions for Laravel routes. Import from `
 <file path="routes/web.php">
 <?php
 
+use App\Http\Controllers\ParentDashboardController;
+use App\Http\Controllers\ParentStudentLimitController;
 use App\Http\Controllers\PosCheckoutController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -21994,10 +22424,9 @@ Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name
 });
 
 // Parent Dashboard - Parent & Admin Access
-Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
-    Route::get('/parent/dashboard', function () {
-        return Inertia::render('ParentDashboard/Index');
-    })->name('parent.dashboard');
+Route::middleware(['auth', 'active', 'role:parent|admin'])->prefix('parent')->name('parent.')->group(function () {
+    Route::get('/dashboard', [ParentDashboardController::class, 'index'])->name('dashboard');
+    Route::patch('/student-limits/{student}', [ParentStudentLimitController::class, 'update'])->name('student-limits.update');
 });
 
 // Admin Panel Routes - Admin Access

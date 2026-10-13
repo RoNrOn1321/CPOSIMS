@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { router } from '@inertiajs/react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/Components/ui/card';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import { Student } from '../types';
 
 interface SpendingLimitsTabProps {
   student: Student;
-  onSaveLimit: (newLimit: number) => void;
+  onSaveLimit?: (newLimit: number) => void;
 }
 
 export default function SpendingLimitsTab({
@@ -17,12 +18,32 @@ export default function SpendingLimitsTab({
   onSaveLimit,
 }: SpendingLimitsTabProps) {
   const [dailyLimitInput, setDailyLimitInput] = useState<number>(student.dailyLimit);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSavedToast, setIsSavedToast] = useState<boolean>(false);
 
+  useEffect(() => {
+    setDailyLimitInput(student.dailyLimit);
+  }, [student.id, student.dailyLimit]);
+
   const handleSave = () => {
-    onSaveLimit(dailyLimitInput);
-    setIsSavedToast(true);
-    setTimeout(() => setIsSavedToast(false), 2500);
+    setIsSubmitting(true);
+    router.patch(
+      `/parent/student-limits/${student.id}`,
+      { daily_limit: dailyLimitInput },
+      {
+        preserveScroll: true,
+        onSuccess: () => {
+          setIsSavedToast(true);
+          if (onSaveLimit) {
+            onSaveLimit(dailyLimitInput);
+          }
+          setTimeout(() => setIsSavedToast(false), 3000);
+        },
+        onFinish: () => {
+          setIsSubmitting(false);
+        },
+      }
+    );
   };
 
   return (
@@ -51,6 +72,7 @@ export default function SpendingLimitsTab({
                     type="number"
                     value={dailyLimitInput}
                     onChange={(e) => setDailyLimitInput(Number(e.target.value))}
+                    disabled={isSubmitting}
                     className="pl-8 text-right font-extrabold text-sm h-10 bg-white"
                   />
                 </div>
@@ -64,6 +86,7 @@ export default function SpendingLimitsTab({
                 <button
                   key={val}
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setDailyLimitInput(val)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
                     dailyLimitInput === val 
@@ -106,9 +129,11 @@ export default function SpendingLimitsTab({
         <CardFooter className="border-t border-slate-100 pt-4 flex justify-end">
           <Button 
             onClick={handleSave}
-            className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-sm"
+            disabled={isSubmitting}
+            className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-sm flex items-center gap-1.5"
           >
-            Save Spending Limits
+            {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+            {isSubmitting ? 'Saving...' : 'Save Spending Limits'}
           </Button>
         </CardFooter>
       </Card>

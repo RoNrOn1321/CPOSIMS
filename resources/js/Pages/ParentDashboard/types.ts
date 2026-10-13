@@ -7,8 +7,10 @@ export interface Student {
   balance: number;
   dailyLimit: number;
   spentToday: number;
+  weeklySpent?: number;
   prohibitedItems: string[];
   allergies: string[];
+  transactions?: Transaction[];
 }
 
 export interface TransactionItem {
@@ -28,6 +30,7 @@ export interface Transaction {
   terminal: string;
   paymentMethod: string;
   balanceAfter: number;
+  rawCreatedAt?: string;
 }
 
 export interface WeeklySpendingPoint {

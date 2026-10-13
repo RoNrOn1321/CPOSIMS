@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
-import { Student, Transaction, WeeklySpendingPoint, CategoryDistributionPoint } from './types';
+import { Student, Transaction } from './types';
 import StudentHeader from './Partials/StudentHeader';
 import QuickStatsGrid from './Partials/QuickStatsGrid';
 import OverviewTab from './Partials/OverviewTab';
@@ -10,153 +10,75 @@ import SpendingLimitsTab from './Partials/SpendingLimitsTab';
 import DietaryRestrictionsTab from './Partials/DietaryRestrictionsTab';
 import TopUpModal from './Partials/TopUpModal';
 import EReceiptModal from './Partials/EReceiptModal';
+import { Users } from 'lucide-react';
 
-const initialStudents: Student[] = [
-  {
-    id: 101,
-    name: 'Juan Dela Cruz',
-    gradeLevel: 'Grade 6 - St. Therese (Elementary)',
-    studentId: '2024-0012',
-    rfidUid: 'RF-882194',
-    balance: 450.0,
-    dailyLimit: 120.0,
-    spentToday: 40.0,
-    prohibitedItems: ['Carbonated Sodas', 'Instant Noodles'],
-    allergies: ['Peanuts'],
-  },
-  {
-    id: 102,
-    name: 'Maria Clara Dela Cruz',
-    gradeLevel: 'Grade 10 - St. Francis (Junior High)',
-    studentId: '2022-0451',
-    rfidUid: 'RF-882195',
-    balance: 620.0,
-    dailyLimit: 200.0,
-    spentToday: 85.0,
-    prohibitedItems: ['High-Caffeine Energy Drinks'],
-    allergies: ['Seafood / Shrimp'],
-  },
-];
+interface ParentDashboardProps {
+  students?: Student[];
+}
 
-const weeklySpendingData: WeeklySpendingPoint[] = [
-  { day: 'Mon', amount: 65, limit: 120, meals: 1, snacks: 1 },
-  { day: 'Tue', amount: 40, limit: 120, meals: 0, snacks: 2 },
-  { day: 'Wed', amount: 85, limit: 120, meals: 1, snacks: 2 },
-  { day: 'Thu', amount: 50, limit: 120, meals: 1, snacks: 0 },
-  { day: 'Fri (Today)', amount: 40, limit: 120, meals: 1, snacks: 0 },
-];
-
-const categoryDistribution: CategoryDistributionPoint[] = [
-  { name: 'Rice Meals', value: 155, color: '#5c1516' },
-  { name: 'Fresh Drinks', value: 50, color: '#008dd5' },
-  { name: 'Snacks & Sandwiches', value: 45, color: '#d38c28' },
-  { name: 'Fruits & Bakery', value: 30, color: '#10b981' },
-];
-
-const sampleTransactions: Transaction[] = [
-  {
-    id: 'TXN-8092',
-    studentId: 101,
-    dateTime: 'Today, 12:15 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Chicken Adobo Rice Bowl', qty: 1, price: 70.0, category: 'Rice Meals' },
-      { name: 'Fresh Calamansi Juice', qty: 1, price: 20.0, category: 'Beverages' },
-    ],
-    total: 40.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 450.0,
-  },
-  {
-    id: 'TXN-8071',
-    studentId: 101,
-    dateTime: 'Yesterday, 09:45 AM',
-    mealType: 'Morning Recess',
-    items: [
-      { name: 'Ham & Egg Toasted Sandwich', qty: 1, price: 35.0, category: 'Snacks & Sandwiches' },
-      { name: 'Mineral Water (500ml)', qty: 1, price: 15.0, category: 'Beverages' },
-    ],
-    total: 50.0,
-    terminal: 'Canteen Terminal #02 (Annex Canteen)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 490.0,
-  },
-  {
-    id: 'TXN-8055',
-    studentId: 101,
-    dateTime: 'Wednesday, 12:20 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Pork Sinigang with Steamed Rice', qty: 1, price: 75.0, category: 'Rice Meals' },
-      { name: 'Fresh Fruit Cup (Melon)', qty: 1, price: 35.0, category: 'Healthy' },
-    ],
-    total: 85.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 540.0,
-  },
-  {
-    id: 'TXN-8032',
-    studentId: 101,
-    dateTime: 'Tuesday, 03:30 PM',
-    mealType: 'Afternoon Snack',
-    items: [
-      { name: 'Cheese Ensaymada', qty: 1, price: 20.0, category: 'Bakery' },
-      { name: 'Dutch Chocolate Milk', qty: 1, price: 20.0, category: 'Beverages' },
-    ],
-    total: 40.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 625.0,
-  },
-  {
-    id: 'TXN-8010',
-    studentId: 101,
-    dateTime: 'Monday, 12:10 PM',
-    mealType: 'Lunch Meal',
-    items: [
-      { name: 'Sweet Style Spaghetti with Cheese', qty: 1, price: 50.0, category: 'Rice Meals' },
-      { name: 'Purified Water (500ml)', qty: 1, price: 15.0, category: 'Beverages' },
-    ],
-    total: 65.0,
-    terminal: 'Canteen Terminal #01 (Main Building)',
-    paymentMethod: 'Student RFID Card Tap',
-    balanceAfter: 665.0,
-  },
-];
-
-export default function ParentDashboardIndex() {
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-  const [selectedStudentId, setSelectedStudentId] = useState<number>(101);
+export default function ParentDashboardIndex({ students = [] }: ParentDashboardProps) {
+  const [selectedStudentId, setSelectedStudentId] = useState<number>(students[0]?.id ?? 0);
   const [activeTab, setActiveTab] = useState<string>('overview');
 
   // Modals
   const [isTopUpOpen, setIsTopUpOpen] = useState<boolean>(false);
   const [selectedReceipt, setSelectedReceipt] = useState<Transaction | null>(null);
 
-  const currentStudent = useMemo(() => {
-    return students.find(s => s.id === selectedStudentId) || students[0];
+  // Synchronize selected child if students array changes
+  useEffect(() => {
+    if (students.length > 0 && !students.some(s => s.id === selectedStudentId)) {
+      setSelectedStudentId(students[0].id);
+    }
   }, [students, selectedStudentId]);
 
-  // Handlers
+  const currentStudent = useMemo(() => {
+    return students.find(s => s.id === selectedStudentId) || students[0] || null;
+  }, [students, selectedStudentId]);
+
+  const studentTransactions = useMemo(() => {
+    return currentStudent?.transactions || [];
+  }, [currentStudent]);
+
+  const weeklyTotal = useMemo(() => {
+    if (currentStudent?.weeklySpent !== undefined) {
+      return currentStudent.weeklySpent;
+    }
+    return studentTransactions.reduce((acc, t) => acc + t.total, 0);
+  }, [currentStudent, studentTransactions]);
+
+  const todayTransaction = useMemo(() => {
+    return studentTransactions.find(t => t.dateTime.toLowerCase().includes('today')) || studentTransactions[0] || null;
+  }, [studentTransactions]);
+
+  // Handle local optimistic balance top-up display
   const handleTopUpConfirm = (amount: number) => {
-    setStudents(prev => prev.map(s => {
-      if (s.id === selectedStudentId) {
-        return { ...s, balance: s.balance + amount };
-      }
-      return s;
-    }));
+    if (currentStudent) {
+      currentStudent.balance += amount;
+    }
   };
 
-  const handleSaveDailyLimit = (newLimit: number) => {
-    setStudents(prev => prev.map(s => {
-      if (s.id === selectedStudentId) {
-        return { ...s, dailyLimit: newLimit };
-      }
-      return s;
-    }));
-  };
+  // Graceful empty state when parent has no linked student accounts
+  if (!currentStudent || students.length === 0) {
+    return (
+      <AdminLayout 
+        portal="parent" 
+        activeNav={activeTab} 
+        onNavigate={setActiveTab}
+      >
+        <div className="bg-white rounded-2xl border border-slate-200/90 p-12 text-center shadow-xs max-w-2xl mx-auto my-8">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-[#5c1516] flex items-center justify-center mx-auto mb-4 shadow-2xs">
+            <Users size={32} />
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">
+            No Linked Student Accounts Found
+          </h2>
+          <p className="text-xs text-slate-500 max-w-md mx-auto mt-2 leading-relaxed">
+            There are currently no student accounts linked to your parent portal profile. Please contact the school canteen cashier or registrar with your child's Student ID to link their RFID tag.
+          </p>
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout 
@@ -176,7 +98,7 @@ export default function ParentDashboardIndex() {
       <QuickStatsGrid
         student={currentStudent}
         onTopUpClick={() => setIsTopUpOpen(true)}
-        weeklyTotal={280.0}
+        weeklyTotal={weeklyTotal}
       />
 
       {/* 3. Main Navigation Tabs */}
@@ -200,9 +122,7 @@ export default function ParentDashboardIndex() {
         <TabsContent value="overview" className="m-0">
           <OverviewTab
             student={currentStudent}
-            weeklySpendingData={weeklySpendingData}
-            categoryDistribution={categoryDistribution}
-            todayTransaction={sampleTransactions[0]}
+            todayTransaction={todayTransaction}
             onViewReceipt={setSelectedReceipt}
           />
         </TabsContent>
@@ -210,7 +130,7 @@ export default function ParentDashboardIndex() {
         {/* Tab 2: Meal History */}
         <TabsContent value="history" className="m-0">
           <MealHistoryTab
-            transactions={sampleTransactions}
+            transactions={studentTransactions}
             onViewReceipt={setSelectedReceipt}
           />
         </TabsContent>
@@ -219,7 +139,6 @@ export default function ParentDashboardIndex() {
         <TabsContent value="limits" className="m-0">
           <SpendingLimitsTab
             student={currentStudent}
-            onSaveLimit={handleSaveDailyLimit}
           />
         </TabsContent>
 

@@ -10,13 +10,29 @@ interface DietaryRestrictionsTabProps {
 export default function DietaryRestrictionsTab({
   student,
 }: DietaryRestrictionsTabProps) {
+  const allergies = student.allergies || [];
+  const prohibited = student.prohibitedItems || [];
+
   const [restrictions, setRestrictions] = useState({
-    peanutAllergy: student.allergies.includes('Peanuts'),
-    seafoodAllergy: student.allergies.includes('Seafood / Shrimp'),
-    blockSoda: student.prohibitedItems.includes('Carbonated Sodas'),
-    blockNoodles: student.prohibitedItems.includes('Instant Noodles'),
-    blockCaffeine: student.prohibitedItems.includes('High-Caffeine Energy Drinks'),
+    peanutAllergy: allergies.includes('Peanuts'),
+    seafoodAllergy: allergies.includes('Seafood / Shrimp'),
+    blockSoda: prohibited.includes('Carbonated Sodas'),
+    blockNoodles: prohibited.includes('Instant Noodles'),
+    blockCaffeine: prohibited.includes('High-Caffeine Energy Drinks'),
   });
+
+  React.useEffect(() => {
+    const currentAllergies = student.allergies || [];
+    const currentProhibited = student.prohibitedItems || [];
+    setRestrictions({
+      peanutAllergy: currentAllergies.includes('Peanuts'),
+      seafoodAllergy: currentAllergies.includes('Seafood / Shrimp'),
+      blockSoda: currentProhibited.includes('Carbonated Sodas'),
+      blockNoodles: currentProhibited.includes('Instant Noodles'),
+      blockCaffeine: currentProhibited.includes('High-Caffeine Energy Drinks'),
+    });
+  }, [student.id, student.allergies, student.prohibitedItems]);
+
 
   return (
     <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">

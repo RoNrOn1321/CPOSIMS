@@ -40,4 +40,12 @@ class Transaction extends Model implements Auditable
     {
         return $this->hasMany(TransactionDetail::class);
     }
+
+    /**
+     * Relationship alias for transaction details.
+     */
+    public function transactionDetails(): HasMany
+    {
+        return $this->details();
+    }
 }
