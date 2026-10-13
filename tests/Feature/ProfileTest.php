@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Support\Facades\Schema;
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();
@@ -34,6 +35,10 @@ test('profile information can be updated', function () {
 });
 
 test('email verification status is unchanged when the email address is unchanged', function () {
+    if (! Schema::hasColumn('users', 'email_verified_at')) {
+        test()->markTestSkipped('Email verification is not enabled in this application.');
+    }
+
     $user = User::factory()->create();
 
     $response = $this
@@ -64,7 +69,7 @@ test('user can delete their account', function () {
         ->assertRedirect('/');
 
     $this->assertGuest();
-    $this->assertNull($user->fresh());
+    $this->assertTrue($user->fresh()->trashed());
 });
 
 test('correct password must be provided to delete account', function () {

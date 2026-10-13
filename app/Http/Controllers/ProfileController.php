@@ -8,6 +8,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -29,9 +30,14 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
-        $request->user()->fill($request->validated());
+        $data = $request->validated();
+        if (isset($data['name']) && ! isset($data['full_name'])) {
+            $data['full_name'] = $data['name'];
+        }
 
-        if ($request->user()->isDirty('email')) {
+        $request->user()->fill($data);
+
+        if ($request->user()->isDirty('email') && Schema::hasColumn('users', 'email_verified_at')) {
             $request->user()->email_verified_at = null;
         }
 

@@ -1,7 +1,14 @@
 export interface User {
     id: number;
-    name: string;
-    email: string;
+    username: string;
+    full_name: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    role: 'admin' | 'cashier' | 'parent' | 'faculty' | 'student';
+    status: 'active' | 'inactive';
+    roles?: string[];
+    permissions?: string[];
     email_verified_at?: string;
 }
 

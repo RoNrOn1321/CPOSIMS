@@ -4,37 +4,50 @@ use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-// Root redirect to POS portal for easy previewing
+// Root redirect based on role or to login
 Route::get('/', function () {
-    return redirect()->route('pos.index');
+    if (auth()->check()) {
+        return match (auth()->user()->role) {
+            'admin' => redirect()->route('admin.products.index'),
+            'cashier' => redirect()->route('pos.index'),
+            'parent' => redirect()->route('parent.dashboard'),
+            default => redirect()->route('dashboard'),
+        };
+    }
+
+    return redirect()->route('login');
 });
 
+// Central Dashboard redirector
 Route::get('/dashboard', function () {
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+    return match (auth()->user()->role) {
+        'admin' => redirect()->route('admin.products.index'),
+        'cashier' => redirect()->route('pos.index'),
+        'parent' => redirect()->route('parent.dashboard'),
+        default => Inertia::render('Dashboard'),
+    };
+})->middleware(['auth', 'active'])->name('dashboard');
 
-/*
-|--------------------------------------------------------------------------
-| Temporary Routes for New File Structure
-|--------------------------------------------------------------------------
-*/
-
-// POS Portal
-Route::get('/pos', function () {
-    return Inertia::render('POS/Index');
-})->name('pos.index');
-
-// Parent Dashboard
-Route::get('/parent/dashboard', function () {
-    return Inertia::render('ParentDashboard/Index');
-})->name('parent.dashboard');
-
-// Admin Panel Routes
-Route::get('/admin', function () {
-    return redirect()->route('admin.products.index');
+// POS Portal - Cashier & Admin Access
+Route::middleware(['auth', 'active', 'role:cashier|admin'])->group(function () {
+    Route::get('/pos', function () {
+        return Inertia::render('POS/Index');
+    })->name('pos.index');
 });
 
-Route::prefix('admin')->name('admin.')->group(function () {
+// Parent Dashboard - Parent & Admin Access
+Route::middleware(['auth', 'active', 'role:parent|admin'])->group(function () {
+    Route::get('/parent/dashboard', function () {
+        return Inertia::render('ParentDashboard/Index');
+    })->name('parent.dashboard');
+});
+
+// Admin Panel Routes - Admin Access
+Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/', function () {
+        return redirect()->route('admin.products.index');
+    });
+
     Route::get('/products', function () {
         return Inertia::render('Admin/Products/Index');
     })->name('products.index');
@@ -53,7 +66,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
 });
 
 // Profile Management
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'active'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');

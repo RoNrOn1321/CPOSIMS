@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\User;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -28,9 +29,24 @@ class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email'],
+            'login' => ['sometimes', 'nullable', 'string'],
+            'email' => ['sometimes', 'nullable', 'string'],
+            'username' => ['sometimes', 'nullable', 'string'],
             'password' => ['required', 'string'],
         ];
+    }
+
+    /**
+     * Configure the validator instance.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
+            if (empty($identifier)) {
+                $validator->errors()->add('email', __('The email or username field is required.'));
+            }
+        });
     }
 
     /**
@@ -42,7 +58,26 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
+        $identifier = $this->input('login') ?? $this->input('email') ?? $this->input('username');
+        $isEmail = filter_var($identifier, FILTER_VALIDATE_EMAIL);
+        $field = $isEmail ? 'email' : 'username';
+
+        $user = User::where($field, $identifier)->first();
+
+        if ($user && ! $user->isActive()) {
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'email' => __('Your account has been deactivated. Please contact the administrator.'),
+            ]);
+        }
+
+        $credentials = [
+            $field => $identifier,
+            'password' => $this->string('password'),
+        ];
+
+        if (! Auth::attempt($credentials, $this->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
@@ -81,6 +116,8 @@ class LoginRequest extends FormRequest
      */
     public function throttleKey(): string
     {
-        return Str::transliterate(Str::lower($this->string('email')).'|'.$this->ip());
+        $identifier = (string) ($this->input('login') ?? $this->input('email') ?? $this->input('username'));
+
+        return Str::transliterate(Str::lower($identifier).'|'.$this->ip());
     }
 }

@@ -74,14 +74,14 @@ export default function Login({
 
                         <Field>
                             <FieldLabel htmlFor="email" className="text-sm font-medium text-zinc-200">
-                                Email
+                                Username or Email
                             </FieldLabel>
                             <Input
                                 id="email"
-                                type="email"
+                                type="text"
                                 name="email"
                                 value={data.email}
-                                placeholder="name@example.com"
+                                placeholder="Enter username or email"
                                 autoComplete="username"
                                 autoFocus
                                 required

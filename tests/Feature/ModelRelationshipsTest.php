@@ -3,9 +3,13 @@
 use App\Models\Category;
 use App\Models\InventoryLog;
 use App\Models\Product;
+use App\Models\StudentAccount;
 use App\Models\Transaction;
 use App\Models\TransactionDetail;
 use App\Models\User;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use OwenIt\Auditing\Auditable;
+use Spatie\Permission\Traits\HasRoles;
 
 test('category has many products and supports soft deletes', function () {
     $category = Category::factory()->create();
@@ -62,4 +66,35 @@ test('inventory log belongs to product and user and connects to inverse relation
         ->and($product->inventoryLogs->first()->id)->toBe($log->id)
         ->and($user->inventoryLogs)->toHaveCount(1)
         ->and($user->inventoryLogs->first()->id)->toBe($log->id);
+});
+
+test('user model implements auditable, uses expected traits, has fillables, and links to student accounts', function () {
+    $parent = User::factory()->create([
+        'role' => 'parent',
+    ]);
+
+    expect($parent)->toBeInstanceOf(OwenIt\Auditing\Contracts\Auditable::class)
+        ->and(in_array(SoftDeletes::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and(in_array(HasRoles::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and(in_array(Auditable::class, class_uses_recursive(User::class)))->toBeTrue()
+        ->and($parent->getFillable())->toEqualCanonicalizing([
+            'username', 'password', 'full_name', 'email', 'phone', 'role', 'status',
+        ]);
+
+    $student = StudentAccount::create([
+        'student_id_number' => 'STU-12345',
+        'first_name' => 'John',
+        'last_name' => 'Doe',
+        'grade_level' => 'Grade 10',
+        'section' => 'St. Francis',
+        'parent_id' => $parent->id,
+        'current_balance' => 150.00,
+        'daily_spending_limit' => 200.00,
+        'is_spending_limited' => true,
+        'status' => 'active',
+    ]);
+
+    expect($parent->studentAccounts)->toHaveCount(1)
+        ->and($parent->studentAccounts->first()->id)->toBe($student->id)
+        ->and($student->parent->id)->toBe($parent->id);
 });
