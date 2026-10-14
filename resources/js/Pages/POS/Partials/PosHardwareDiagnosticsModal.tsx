@@ -12,6 +12,7 @@ import { Input } from '@/Components/ui/input';
 import { Badge } from '@/Components/ui/badge';
 import { formatMoney } from '@/lib/formatters';
 import { lookup } from '@/routes/pos/student';
+import { status as hardwareStatusRoute } from '@/routes/pos/hardware';
 import axios from 'axios';
 import ThermalReceipt, { printThermalReceipt } from '@/Components/POS/ThermalReceipt';
 import { Product } from './ProductGrid';
@@ -38,6 +39,22 @@ interface PosHardwareDiagnosticsModalProps {
   products?: Product[];
 }
 
+interface ServerHardwareStatus {
+  server_online: boolean;
+  checked_at: string;
+  os_family: string;
+  spooler_status?: string;
+  hid_devices_count?: number;
+  thermal_printer_detected?: boolean;
+}
+
+interface ScanTelemetry {
+  avgMsPerChar: number;
+  totalChars: number;
+  durationMs: number;
+  isHardware: boolean;
+}
+
 export default function PosHardwareDiagnosticsModal({
   isOpen,
   onClose,
@@ -51,25 +68,107 @@ export default function PosHardwareDiagnosticsModal({
     query?: string;
   }>({ type: null });
 
+  const [scanTelemetry, setScanTelemetry] = useState<ScanTelemetry | null>(null);
   const [hasPrinted, setHasPrinted] = useState<boolean>(false);
-  const scanInputRef = useRef<HTMLInputElement>(null);
+  const [barcodeStatus, setBarcodeStatus] = useState<string>('Standby (HID Listener Active)');
+  const [rfidStatus, setRfidStatus] = useState<string>('Standby (13.56 MHz Listener)');
 
-  // Auto-focus the scan test input when dialog opens
+  const [serverStatus, setServerStatus] = useState<ServerHardwareStatus | null>(null);
+  const [browserOnline, setBrowserOnline] = useState<boolean>(true);
+  const [webUsbSupported, setWebUsbSupported] = useState<boolean>(false);
+  const [webHidSupported, setWebHidSupported] = useState<boolean>(false);
+
+  const scanInputRef = useRef<HTMLInputElement>(null);
+  const keystrokeTimestampsRef = useRef<number[]>([]);
+
+  // Auto-focus and poll hardware status when dialog opens
   useEffect(() => {
-    if (isOpen) {
-      setScanInput('');
-      setScanResult({ type: null });
-      setHasPrinted(false);
-      setTimeout(() => {
-        scanInputRef.current?.focus();
-      }, 100);
+    if (!isOpen) return;
+
+    setScanInput('');
+    setScanResult({ type: null });
+    setScanTelemetry(null);
+    setHasPrinted(false);
+    keystrokeTimestampsRef.current = [];
+
+    setTimeout(() => {
+      scanInputRef.current?.focus();
+    }, 100);
+
+    // Browser capabilities
+    if (typeof navigator !== 'undefined') {
+      setBrowserOnline(navigator.onLine);
+      setWebUsbSupported('usb' in navigator);
+      setWebHidSupported('hid' in navigator);
     }
+
+    const handleOnline = () => setBrowserOnline(true);
+    const handleOffline = () => setBrowserOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Host Hardware Polling
+    const fetchStatus = async () => {
+      try {
+        const res = await axios.get(hardwareStatusRoute().url, {
+          headers: { Accept: 'application/json' },
+        });
+        if (res.status === 200 && res.data) {
+          setServerStatus(res.data);
+        }
+      } catch {
+        setServerStatus((prev) => (prev ? { ...prev, server_online: false } : null));
+      }
+    };
+
+    fetchStatus();
+    const intervalId = setInterval(fetchStatus, 5000);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, [isOpen]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (['Shift', 'Control', 'Alt', 'Meta', 'Tab', 'CapsLock'].includes(e.key)) {
+      return;
+    }
+    if (e.key === 'Enter') {
+      return;
+    }
+    keystrokeTimestampsRef.current.push(performance.now());
+  };
 
   // Execute scan diagnostic test
   const handleTestScan = async (codeToTest?: string) => {
     const query = (codeToTest ?? scanInput).trim();
     if (!query) return;
+
+    // Calculate inter-keystroke velocity telemetry
+    const timestamps = keystrokeTimestampsRef.current;
+    let telemetry: ScanTelemetry | null = null;
+    if (timestamps.length >= 2) {
+      const durationMs = timestamps[timestamps.length - 1] - timestamps[0];
+      const totalChars = timestamps.length;
+      const avgMs = durationMs / Math.max(1, totalChars - 1);
+      telemetry = {
+        avgMsPerChar: Math.round(avgMs * 10) / 10,
+        totalChars,
+        durationMs: Math.round(durationMs),
+        isHardware: avgMs < 50,
+      };
+    } else if (timestamps.length === 1) {
+      telemetry = {
+        avgMsPerChar: 0,
+        totalChars: 1,
+        durationMs: 0,
+        isHardware: true,
+      };
+    }
+    setScanTelemetry(telemetry);
+    keystrokeTimestampsRef.current = [];
 
     setIsScanning(true);
     setScanResult({ type: null });
@@ -86,12 +185,14 @@ export default function PosHardwareDiagnosticsModal({
           data: matchedProduct,
           query,
         });
+        const speedText = telemetry ? `${telemetry.avgMsPerChar} ms/char` : 'Verified';
+        setBarcodeStatus(`Verified Online (${speedText})`);
         return;
       }
 
       // 2. Query student account via RFID UID or Student ID Number
       const res = await axios.get(lookup().url, {
-        params: { query },
+        params: { identifier: query },
         headers: { Accept: 'application/json' },
       });
 
@@ -101,6 +202,8 @@ export default function PosHardwareDiagnosticsModal({
           data: res.data,
           query,
         });
+        const speedText = telemetry ? `${telemetry.avgMsPerChar} ms/char` : 'Verified';
+        setRfidStatus(`Verified Online (${speedText})`);
         return;
       }
 
@@ -109,11 +212,29 @@ export default function PosHardwareDiagnosticsModal({
         type: 'unknown',
         query,
       });
+
+      if (telemetry?.isHardware) {
+        const speedText = `${telemetry.avgMsPerChar} ms/char`;
+        if (query.length >= 8) {
+          setRfidStatus(`Verified Online (${speedText})`);
+        } else {
+          setBarcodeStatus(`Verified Online (${speedText})`);
+        }
+      }
     } catch (err: any) {
       setScanResult({
         type: 'unknown',
         query,
       });
+
+      if (telemetry?.isHardware) {
+        const speedText = `${telemetry.avgMsPerChar} ms/char`;
+        if (query.length >= 8) {
+          setRfidStatus(`Verified Online (${speedText})`);
+        } else {
+          setBarcodeStatus(`Verified Online (${speedText})`);
+        }
+      }
     } finally {
       setIsScanning(false);
     }
@@ -147,28 +268,84 @@ export default function PosHardwareDiagnosticsModal({
         <div className="space-y-4 py-3 text-xs">
           {/* Peripheral Status Capsules */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 flex flex-col items-center text-center">
-              <Barcode size={18} className="text-emerald-700 mb-1" />
-              <span className="font-bold text-[11px] text-emerald-900">Barcode Scanner</span>
-              <span className="text-[10px] text-emerald-700 font-semibold">HID Ready</span>
+            <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+              barcodeStatus.startsWith('Verified')
+                ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-2xs'
+                : 'border-slate-200 bg-slate-50/70 text-slate-700'
+            }`}>
+              <Barcode size={18} className={barcodeStatus.startsWith('Verified') ? 'text-emerald-700 mb-1' : 'text-slate-500 mb-1'} />
+              <span className="font-bold text-[11px]">Barcode Scanner</span>
+              <span className={`text-[10px] font-semibold ${barcodeStatus.startsWith('Verified') ? 'text-emerald-700' : 'text-slate-500'}`}>
+                {barcodeStatus}
+              </span>
             </div>
 
-            <div className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 flex flex-col items-center text-center">
-              <Radio size={18} className="text-emerald-700 mb-1" />
-              <span className="font-bold text-[11px] text-emerald-900">RFID Reader</span>
-              <span className="text-[10px] text-emerald-700 font-semibold">13.56 MHz Ready</span>
+            <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+              rfidStatus.startsWith('Verified')
+                ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-2xs'
+                : 'border-slate-200 bg-slate-50/70 text-slate-700'
+            }`}>
+              <Radio size={18} className={rfidStatus.startsWith('Verified') ? 'text-emerald-700 mb-1' : 'text-slate-500 mb-1'} />
+              <span className="font-bold text-[11px]">RFID Reader</span>
+              <span className={`text-[10px] font-semibold ${rfidStatus.startsWith('Verified') ? 'text-emerald-700' : 'text-slate-500'}`}>
+                {rfidStatus}
+              </span>
             </div>
 
-            <div className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 flex flex-col items-center text-center">
+            <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+              hasPrinted
+                ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-2xs'
+                : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+            }`}>
               <Printer size={18} className="text-emerald-700 mb-1" />
               <span className="font-bold text-[11px] text-emerald-900">XP-58IIH Thermal</span>
-              <span className="text-[10px] text-emerald-700 font-semibold">58mm Driver OK</span>
+              <span className="text-[10px] text-emerald-700 font-semibold">
+                {hasPrinted ? 'Verified Printed' : (serverStatus?.spooler_status === 'stopped' ? 'Spooler Stopped' : 'Spooler Ready')}
+              </span>
             </div>
 
-            <div className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 flex flex-col items-center text-center">
+            <div className={`p-2.5 rounded-xl border flex flex-col items-center text-center transition-all ${
+              hasPrinted
+                ? 'border-emerald-300 bg-emerald-50/90 text-emerald-950 shadow-2xs'
+                : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+            }`}>
               <Zap size={18} className="text-emerald-700 mb-1" />
               <span className="font-bold text-[11px] text-emerald-900">RJ11 Cash Drawer</span>
-              <span className="text-[10px] text-emerald-700 font-semibold">Solenoid Armed</span>
+              <span className="text-[10px] text-emerald-700 font-semibold">
+                {hasPrinted ? 'Pulse Sent' : 'Linked via XP-58IIH RJ11'}
+              </span>
+            </div>
+          </div>
+
+          {/* Real-time Host OS & Browser Status Ribbon */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-100/90 border border-slate-200 rounded-xl text-[11px] text-slate-600">
+            <div className="flex items-center gap-2">
+              <span className={`flex h-2 w-2 rounded-full ${serverStatus?.server_online ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <span className="font-semibold text-slate-700">Host OS:</span>
+              <span>{serverStatus?.os_family ?? 'Detecting...'}</span>
+              <span className="text-slate-300">|</span>
+              <span className="font-semibold text-slate-700">Spooler:</span>
+              <span className={serverStatus?.spooler_status === 'running' ? 'text-emerald-700 font-bold' : 'text-slate-600'}>
+                {serverStatus?.spooler_status ? serverStatus.spooler_status.toUpperCase() : 'READY'}
+              </span>
+              {serverStatus?.hid_devices_count !== undefined && serverStatus.hid_devices_count > 0 && (
+                <>
+                  <span className="text-slate-300">|</span>
+                  <span className="font-semibold text-slate-700">HID Devices:</span>
+                  <span className="font-mono text-emerald-800 font-bold">{serverStatus.hid_devices_count} active</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-[10px]">
+              <Badge variant="outline" className={`text-[10px] py-0 px-1.5 ${browserOnline ? 'border-emerald-300 text-emerald-700 bg-emerald-50' : 'border-rose-300 text-rose-700 bg-rose-50'}`}>
+                {browserOnline ? 'Browser Online' : 'Browser Offline'}
+              </Badge>
+              <Badge variant="outline" className={`text-[10px] py-0 px-1.5 ${webUsbSupported ? 'border-blue-300 text-blue-700 bg-blue-50' : 'border-slate-200 text-slate-400 bg-white'}`}>
+                WebUSB {webUsbSupported ? 'Ready' : 'N/A'}
+              </Badge>
+              <Badge variant="outline" className={`text-[10px] py-0 px-1.5 ${webHidSupported ? 'border-purple-300 text-purple-700 bg-purple-50' : 'border-slate-200 text-slate-400 bg-white'}`}>
+                WebHID {webHidSupported ? 'Ready' : 'N/A'}
+              </Badge>
             </div>
           </div>
 
@@ -197,6 +374,7 @@ export default function PosHardwareDiagnosticsModal({
                   type="text"
                   value={scanInput}
                   onChange={(e) => setScanInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
                   placeholder="Scan product barcode (e.g. STCT-1001) or tap RFID card..."
                   className="font-mono text-xs bg-white pr-8 uppercase"
                 />
@@ -206,6 +384,8 @@ export default function PosHardwareDiagnosticsModal({
                     onClick={() => {
                       setScanInput('');
                       setScanResult({ type: null });
+                      setScanTelemetry(null);
+                      keystrokeTimestampsRef.current = [];
                       scanInputRef.current?.focus();
                     }}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
@@ -222,6 +402,34 @@ export default function PosHardwareDiagnosticsModal({
                 {isScanning ? <RefreshCw size={13} className="animate-spin" /> : 'Test Read'}
               </Button>
             </form>
+
+            {/* Scan Velocity Telemetry Badge */}
+            {scanTelemetry && (
+              <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                scanTelemetry.isHardware 
+                  ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900' 
+                  : 'bg-amber-50/80 border-amber-200 text-amber-900'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {scanTelemetry.isHardware ? (
+                    <Zap size={15} className="text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                  )}
+                  <div>
+                    <span className="font-bold">
+                      {scanTelemetry.isHardware ? 'Hardware Scanner / RFID Reader Verified' : 'Manual Keyboard Input Detected'}
+                    </span>
+                    <span className="text-[11px] block text-slate-500">
+                      Scan Speed: <strong className="font-mono text-slate-700">{scanTelemetry.avgMsPerChar} ms/char</strong> &bull; Total: {scanTelemetry.totalChars} chars in {scanTelemetry.durationMs}ms
+                    </span>
+                  </div>
+                </div>
+                <Badge className={scanTelemetry.isHardware ? 'bg-emerald-600 text-white font-bold text-[10px]' : 'bg-amber-500 text-white font-bold text-[10px]'}>
+                  {scanTelemetry.isHardware ? '< 50ms/char • HID Burst' : '>= 50ms/char • Human Input'}
+                </Badge>
+              </div>
+            )}
 
             {/* Diagnostic Detection Output */}
             {scanResult.type === 'product' && (

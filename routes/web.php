@@ -43,6 +43,7 @@ Route::get('/dashboard', function () {
 Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
     Route::get('/', [PosController::class, 'index'])->name('index');
     Route::get('/student-lookup', [PosController::class, 'lookupStudent'])->name('student.lookup');
+    Route::get('/hardware-status', [PosController::class, 'hardwareStatus'])->name('hardware.status');
     Route::post('/checkout', PosCheckoutController::class)->name('checkout');
     Route::post('/topup', [BalanceTopupController::class, 'posStore'])->name('topup');
     Route::post('/transactions/{transaction}/void', [PosController::class, 'voidTransaction'])->name('transactions.void');

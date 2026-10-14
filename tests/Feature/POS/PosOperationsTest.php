@@ -285,3 +285,30 @@ it('immediately blocks POS purchases and reloads when card is frozen as lost_car
     expect((float) $child->fresh()->current_balance)->toBe(200.00)
         ->and($product->fresh()->stock_quantity)->toBe(10);
 });
+
+it('returns server hardware status for authenticated cashiers', function () {
+    $cashier = User::factory()->cashier()->create();
+
+    $response = $this->actingAs($cashier)->getJson(route('pos.hardware.status'));
+
+    $response->assertOk()
+        ->assertJsonPath('server_online', true)
+        ->assertJsonStructure([
+            'server_online',
+            'checked_at',
+            'os_family',
+            'spooler_status',
+            'hid_devices_count',
+            'thermal_printer_detected',
+        ]);
+});
+
+it('blocks unauthenticated or unauthorized users from hardware status endpoint', function () {
+    $parent = User::factory()->parent()->create();
+
+    // Guests redirected to login
+    $this->get(route('pos.hardware.status'))->assertRedirect('/login');
+
+    // Parents forbidden
+    $this->actingAs($parent)->get(route('pos.hardware.status'))->assertForbidden();
+});

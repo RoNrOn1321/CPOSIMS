@@ -86,8 +86,51 @@ lookupStudent.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => (
 })
 
 /**
-* @see \App\Http\Controllers\PosController::voidTransaction
+* @see \App\Http\Controllers\PosController::hardwareStatus
  * @see app/Http/Controllers/PosController.php:135
+ * @route '/pos/hardware-status'
+ */
+export const hardwareStatus = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: hardwareStatus.url(options),
+    method: 'get',
+})
+
+hardwareStatus.definition = {
+    methods: ["get","head"],
+    url: '/pos/hardware-status',
+} satisfies RouteDefinition<["get","head"]>
+
+/**
+* @see \App\Http\Controllers\PosController::hardwareStatus
+ * @see app/Http/Controllers/PosController.php:135
+ * @route '/pos/hardware-status'
+ */
+hardwareStatus.url = (options?: RouteQueryOptions) => {
+    return hardwareStatus.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\PosController::hardwareStatus
+ * @see app/Http/Controllers/PosController.php:135
+ * @route '/pos/hardware-status'
+ */
+hardwareStatus.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
+    url: hardwareStatus.url(options),
+    method: 'get',
+})
+/**
+* @see \App\Http\Controllers\PosController::hardwareStatus
+ * @see app/Http/Controllers/PosController.php:135
+ * @route '/pos/hardware-status'
+ */
+hardwareStatus.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
+    url: hardwareStatus.url(options),
+    method: 'head',
+})
+
+/**
+* @see \App\Http\Controllers\PosController::voidTransaction
+ * @see app/Http/Controllers/PosController.php:193
  * @route '/pos/transactions/{transaction}/void'
  */
 export const voidTransaction = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
@@ -102,7 +145,7 @@ voidTransaction.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:193
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.url = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions) => {
@@ -135,13 +178,13 @@ voidTransaction.url = (args: { transaction: number | { id: number } } | [transac
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:193
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.post = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
     url: voidTransaction.url(args, options),
     method: 'post',
 })
-const PosController = { index, lookupStudent, voidTransaction }
+const PosController = { index, lookupStudent, hardwareStatus, voidTransaction }
 
 export default PosController

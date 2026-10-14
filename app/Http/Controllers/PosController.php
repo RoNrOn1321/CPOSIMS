@@ -130,6 +130,64 @@ class PosController extends Controller
     }
 
     /**
+     * Safely inspect host operating system hardware status for POS peripherals.
+     */
+    public function hardwareStatus(): JsonResponse
+    {
+        $osFamily = PHP_OS_FAMILY;
+        $spoolerStatus = 'unknown';
+        $hidDevicesCount = 0;
+        $thermalPrinterDetected = false;
+
+        try {
+            if ($osFamily === 'Windows' && function_exists('shell_exec')) {
+                // Check Windows Print Spooler service
+                $scOutput = @shell_exec('sc.exe query Spooler 2>nul');
+                if ($scOutput && str_contains($scOutput, 'RUNNING')) {
+                    $spoolerStatus = 'running';
+                } elseif ($scOutput && str_contains($scOutput, 'STOPPED')) {
+                    $spoolerStatus = 'stopped';
+                }
+
+                // Check connected HID devices
+                $hidOutput = @shell_exec('pnputil /enum-devices /class HIDClass /connected 2>nul');
+                if ($hidOutput) {
+                    $hidDevicesCount = substr_count($hidOutput, 'Instance ID:');
+                }
+
+                // Check connected printer queues
+                $printerOutput = @shell_exec('pnputil /enum-devices /class PrintQueue /connected 2>nul');
+                if ($printerOutput && preg_match('/XP[-_ ]?58|POS[-_ ]?58|Thermal|Xprinter/i', $printerOutput)) {
+                    $thermalPrinterDetected = true;
+                }
+            } elseif ($osFamily === 'Linux' && function_exists('shell_exec')) {
+                $cupsOutput = @shell_exec('systemctl is-active cups 2>/dev/null');
+                if ($cupsOutput && trim($cupsOutput) === 'active') {
+                    $spoolerStatus = 'running';
+                }
+                $lsusbOutput = @shell_exec('lsusb 2>/dev/null');
+                if ($lsusbOutput) {
+                    $hidDevicesCount = substr_count($lsusbOutput, 'Bus ');
+                    if (preg_match('/printer|XP[-_ ]?58|POS[-_ ]?58/i', $lsusbOutput)) {
+                        $thermalPrinterDetected = true;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // Silently fall back to default values in restricted or test environments
+        }
+
+        return response()->json([
+            'server_online' => true,
+            'checked_at' => now()->toIso8601String(),
+            'os_family' => $osFamily,
+            'spooler_status' => $spoolerStatus,
+            'hid_devices_count' => $hidDevicesCount,
+            'thermal_printer_detected' => $thermalPrinterDetected,
+        ], 200);
+    }
+
+    /**
      * Void a completed POS transaction, restoring product inventory and refunding student balance if cashless.
      */
     public function voidTransaction(Request $request, Transaction $transaction): JsonResponse|RedirectResponse

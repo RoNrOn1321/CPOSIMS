@@ -1,5 +1,6 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 import student from './student'
+import hardware from './hardware'
 import transactions from './transactions'
 /**
 * @see \App\Http\Controllers\PosController::index
@@ -114,6 +115,7 @@ topup.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
 const pos = {
     index: Object.assign(index, index),
 student: Object.assign(student, student),
+hardware: Object.assign(hardware, hardware),
 checkout: Object.assign(checkout, checkout),
 topup: Object.assign(topup, topup),
 transactions: Object.assign(transactions, transactions),
