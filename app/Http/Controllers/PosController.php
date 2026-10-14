@@ -27,6 +27,22 @@ class PosController extends Controller
             ->orderBy('name')
             ->get()
             ->map(function (Product $product) {
+                $categoryName = strtolower($product->category?->name ?? '');
+
+                $image = match (true) {
+                    str_contains($categoryName, 'supply') ||
+                    str_contains($categoryName, 'supplies') ||
+                    str_contains($categoryName, 'stationery') ||
+                    str_contains($categoryName, 'school') => 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=400&q=80',
+                    str_contains($categoryName, 'beverage') ||
+                    str_contains($categoryName, 'drink') ||
+                    str_contains($categoryName, 'juice') => 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400&q=80',
+                    str_contains($categoryName, 'snack') ||
+                    str_contains($categoryName, 'bread') ||
+                    str_contains($categoryName, 'sandwich') => 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
+                    default => 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
+                };
+
                 return [
                     'id' => $product->id,
                     'name' => $product->name,
@@ -34,7 +50,7 @@ class PosController extends Controller
                     'price' => (float) $product->price,
                     'stock' => (int) $product->stock_quantity,
                     'barcode' => $product->barcode,
-                    'image' => 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
+                    'image' => $image,
                 ];
             })
             ->values()

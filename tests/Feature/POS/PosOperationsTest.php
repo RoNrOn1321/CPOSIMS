@@ -15,7 +15,7 @@ beforeEach(function () {
 
 it('renders POS register with live active products, categories, and recent transactions', function () {
     $cashier = User::factory()->cashier()->create();
-    $category = Category::factory()->create(['name' => 'Rice Meals']);
+    $category = Category::firstOrCreate(['name' => 'Rice Meals']);
     $activeProduct = Product::factory()->create([
         'category_id' => $category->id,
         'name' => 'Chicken Adobo Bowl',
@@ -55,12 +55,25 @@ it('renders POS register with live active products, categories, and recent trans
     $response->assertOk();
     $response->assertInertia(fn (Assert $page) => $page
         ->component('POS/Index')
-        ->has('products', 1)
-        ->where('products.0.id', $activeProduct->id)
-        ->where('products.0.name', 'Chicken Adobo Bowl')
-        ->where('products.0.category', 'Rice Meals')
-        ->where('products.0.price', 75)
-        ->where('products.0.stock', 20)
+        ->has('products', 8)
+        ->where('products', function ($products) use ($activeProduct) {
+            $items = collect($products);
+
+            $ballpen = $items->firstWhere('barcode', 'STCT-2001');
+            $water = $items->firstWhere('barcode', 'STCT-1003');
+            $sandwich = $items->firstWhere('barcode', 'STCT-1002');
+            $meal = $items->firstWhere('id', $activeProduct->id);
+
+            return $items->contains('id', $activeProduct->id)
+                && $ballpen !== null
+                && $ballpen['image'] === 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=400&q=80'
+                && $water !== null
+                && $water['image'] === 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400&q=80'
+                && $sandwich !== null
+                && $sandwich['image'] === 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80'
+                && $meal !== null
+                && $meal['image'] === 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
+        })
         ->has('categories')
         ->has('recentTransactions', 1)
         ->where('recentTransactions.0.receipt_number', $transaction->receipt_number)

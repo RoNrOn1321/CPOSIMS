@@ -50,10 +50,10 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
           </Link>
           <div>
             <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-              Add New Food Item
+              Add New Product
             </h1>
             <p className="text-xs text-slate-500">
-              Create a cafeteria menu item for cashier POS terminal sales and student allowance limits.
+              Create a product or cafeteria inventory item for cashier POS terminal sales and student allowance limits.
             </p>
           </div>
         </div>
@@ -64,7 +64,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
           disabled={processing}
           className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-sm flex items-center gap-2 disabled:opacity-50"
         >
-          <Save size={15} /> {processing ? 'Saving...' : 'Save Food Item'}
+          <Save size={15} /> {processing ? 'Saving...' : 'Save Product'}
         </Button>
       </div>
 
@@ -107,7 +107,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                    Menu Category <span className="text-red-500">*</span>
+                    Product Category <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={data.category_id}
@@ -296,7 +296,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
                   disabled={processing}
                   className="w-full bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 rounded-xl shadow-sm"
                 >
-                  {processing ? 'Registering...' : 'Confirm & Register Food Item'}
+                  {processing ? 'Registering...' : 'Confirm & Register Product'}
                 </Button>
               </div>
             </CardContent>

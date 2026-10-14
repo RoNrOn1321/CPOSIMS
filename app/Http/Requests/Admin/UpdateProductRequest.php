@@ -51,9 +51,9 @@ class UpdateProductRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'category_id.required' => 'Please select a valid menu category.',
-            'category_id.exists' => 'The selected menu category does not exist.',
-            'barcode.unique' => 'This barcode is already assigned to another food item.',
+            'category_id.required' => 'Please select a valid product category.',
+            'category_id.exists' => 'The selected product category does not exist.',
+            'barcode.unique' => 'This barcode is already assigned to another product.',
             'price.min' => 'Selling price cannot be negative.',
             'cost.min' => 'Capital cost cannot be negative.',
             'stock_quantity.min' => 'Stock quantity cannot be negative.',

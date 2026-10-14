@@ -93,7 +93,7 @@ class ProductController extends Controller
         });
 
         return redirect()->route('admin.products.index')
-            ->with('success', 'Food item registered successfully!');
+            ->with('success', 'Product registered successfully!');
     }
 
     /**
@@ -161,6 +161,6 @@ class ProductController extends Controller
         });
 
         return redirect()->route('admin.products.index')
-            ->with('success', 'Food item removed from inventory.');
+            ->with('success', 'Product removed from inventory.');
     }
 }

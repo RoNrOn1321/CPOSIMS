@@ -138,11 +138,19 @@ it('includes itemized transaction history and products in the dashboard prop', f
     $parent = User::factory()->parent()->create();
     $child = StudentAccount::factory()->create(['parent_id' => $parent->id]);
     $cashier = User::factory()->cashier()->create();
-    $category = Category::factory()->create(['name' => 'Rice Meals']);
-    $product = Product::factory()->create([
-        'name' => 'Chicken Adobo Rice Bowl',
-        'category_id' => $category->id,
-    ]);
+    $category = Category::firstOrCreate(['name' => 'Rice Meals']);
+    $product = Product::firstOrCreate(
+        ['barcode' => 'STCT-1001'],
+        [
+            'name' => 'Chicken Adobo Rice Bowl',
+            'category_id' => $category->id,
+            'price' => 65.00,
+            'cost' => 40.00,
+            'stock_quantity' => 40,
+            'reorder_level' => 10,
+            'status' => 'active',
+        ]
+    );
 
     $transaction = Transaction::factory()->create([
         'student_account_id' => $child->id,

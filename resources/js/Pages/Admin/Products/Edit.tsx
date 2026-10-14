@@ -72,7 +72,7 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-black text-slate-800 tracking-tight">
-                Edit Food Item: {product.name}
+                Edit Product: {product.name}
               </h1>
               <Badge className={data.status === 'active' ? 'bg-emerald-100 text-emerald-800 border-0 text-[10px] font-bold' : 'bg-slate-100 text-slate-600 border-0 text-[10px] font-bold'}>
                 {data.status === 'active' ? 'Active in POS' : 'Inactive'}
@@ -115,13 +115,13 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
           <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
             <CardHeader>
               <CardTitle className="text-base font-extrabold text-slate-800">
-                Menu Item Specifications
+                Product Specifications
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Food Item Name <span className="text-red-500">*</span>
+                  Product Name <span className="text-red-500">*</span>
                 </label>
                 <Input
                   required

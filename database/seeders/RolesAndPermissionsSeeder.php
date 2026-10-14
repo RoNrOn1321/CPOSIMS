@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\Category;
+use App\Models\Product;
 use App\Models\StudentAccount;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -161,6 +163,122 @@ class RolesAndPermissionsSeeder extends Seeder
                 'current_balance' => 350.00,
                 'daily_spending_limit' => 200.00,
                 'is_spending_limited' => true,
+                'status' => 'active',
+            ]
+        );
+
+        // 5. Seed Default Product Categories
+        $riceMeals = Category::firstOrCreate(
+            ['name' => 'Rice Meals'],
+            ['description' => 'Hearty cafeteria rice bowls and warm lunch plates']
+        );
+
+        $snacks = Category::firstOrCreate(
+            ['name' => 'Snacks & Sandwiches'],
+            ['description' => 'Quick bites, toasted sandwiches, and light canteen snacks']
+        );
+
+        $beverages = Category::firstOrCreate(
+            ['name' => 'Beverages'],
+            ['description' => 'Chilled drinks, mineral water, and fruit refreshments']
+        );
+
+        $schoolSupplies = Category::firstOrCreate(
+            ['name' => 'School Supplies'],
+            ['description' => 'Essential classroom supplies, writing tools, and student paper items']
+        );
+
+        // 6. Seed Default Barcoded Products (Food & School Supplies)
+        // Food & Drinks:
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-1001'],
+            [
+                'name' => 'Chicken Adobo Rice Bowl',
+                'category_id' => $riceMeals->id,
+                'price' => 65.00,
+                'cost' => 40.00,
+                'stock_quantity' => 40,
+                'reorder_level' => 10,
+                'status' => 'active',
+            ]
+        );
+
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-1002'],
+            [
+                'name' => 'Ham & Cheese Sandwich',
+                'category_id' => $snacks->id,
+                'price' => 35.00,
+                'cost' => 20.00,
+                'stock_quantity' => 50,
+                'reorder_level' => 10,
+                'status' => 'active',
+            ]
+        );
+
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-1003'],
+            [
+                'name' => 'Bottled Mineral Water 500ml',
+                'category_id' => $beverages->id,
+                'price' => 15.00,
+                'cost' => 8.00,
+                'stock_quantity' => 80,
+                'reorder_level' => 15,
+                'status' => 'active',
+            ]
+        );
+
+        // School Supplies:
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-2001'],
+            [
+                'name' => 'HBW Matrix Ballpen (Black)',
+                'category_id' => $schoolSupplies->id,
+                'price' => 12.00,
+                'cost' => 7.00,
+                'stock_quantity' => 100,
+                'reorder_level' => 20,
+                'status' => 'active',
+            ]
+        );
+
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-2002'],
+            [
+                'name' => 'Whole Intermediate Pad Paper',
+                'category_id' => $schoolSupplies->id,
+                'price' => 30.00,
+                'cost' => 18.00,
+                'stock_quantity' => 60,
+                'reorder_level' => 15,
+                'status' => 'active',
+            ]
+        );
+
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-2003'],
+            [
+                'name' => 'Cattleya Spiral Notebook',
+                'category_id' => $schoolSupplies->id,
+                'price' => 45.00,
+                'cost' => 28.00,
+                'stock_quantity' => 40,
+                'reorder_level' => 10,
+                'status' => 'active',
+            ]
+        );
+
+        // Seeded as low-stock (stock 8 <= reorder 15) for low-stock alerts
+        Product::firstOrCreate(
+            ['barcode' => 'STCT-2004'],
+            [
+                'name' => 'Long Brown Envelope',
+                'category_id' => $schoolSupplies->id,
+                'price' => 8.00,
+                'cost' => 4.00,
+                'stock_quantity' => 8,
+                'reorder_level' => 15,
                 'status' => 'active',
             ]
         );

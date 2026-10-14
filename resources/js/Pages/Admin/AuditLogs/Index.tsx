@@ -249,7 +249,7 @@ export default function AuditLogsIndex({
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
               <Input
-                placeholder="Search food item, actor, barcode..."
+                placeholder="Search product, actor, barcode..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 h-9 text-xs bg-white rounded-xl border-slate-200"
@@ -281,7 +281,7 @@ export default function AuditLogsIndex({
               <TableRow>
                 <TableHead className="text-xs font-bold text-slate-700 py-3.5">Log ID & Time</TableHead>
                 <TableHead className="text-xs font-bold text-slate-700">Action Type</TableHead>
-                <TableHead className="text-xs font-bold text-slate-700">Food Item</TableHead>
+                <TableHead className="text-xs font-bold text-slate-700">Product</TableHead>
                 <TableHead className="text-xs font-bold text-slate-700">Stock Transition</TableHead>
                 <TableHead className="text-xs font-bold text-slate-700">Operator / Actor</TableHead>
                 <TableHead className="text-xs font-bold text-slate-700">Remarks / Reference</TableHead>
@@ -313,7 +313,7 @@ export default function AuditLogsIndex({
 
                       <TableCell>
                         <div className="font-extrabold text-xs text-slate-800">
-                          {log.product?.name || 'Deleted Food Item'}
+                          {log.product?.name || 'Deleted Product'}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono">
                           {log.product?.barcode || 'N/A'}
@@ -398,7 +398,7 @@ export default function AuditLogsIndex({
                   </Badge>
                 </div>
                 <DialogTitle className="text-base font-extrabold text-slate-800 pt-1">
-                  Inventory Event: {inspectedLog.product?.name || 'Food Item'}
+                  Inventory Event: {inspectedLog.product?.name || 'Product'}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500">
                   Recorded on {formatDateTime(inspectedLog.created_at)}

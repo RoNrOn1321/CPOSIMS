@@ -243,7 +243,7 @@ export default function ProductGrid({
             </div>
             <h3 className="font-bold text-slate-700 text-base">No items match your search</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              Try adjusting your search query or selecting a different menu category.
+              Try adjusting your search query or selecting a different category.
             </p>
           </div>
         ) : (

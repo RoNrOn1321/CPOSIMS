@@ -93,6 +93,7 @@ const categoryPlaceholders: Record<string, string> = {
   'Beverages': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&q=80',
   'Bakery': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
   'Healthy': 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
+  'School Supplies': 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=400&q=80',
 };
 
 export default function ProductsIndex({ 
@@ -169,7 +170,7 @@ export default function ProductsIndex({
           className="flex items-center gap-1 font-bold text-xs text-slate-700 hover:text-slate-900"
           onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
         >
-          Food Item
+          Product
           <ArrowUpDown size={12} className="text-slate-400" />
         </button>
       ),
@@ -365,7 +366,7 @@ export default function ProductsIndex({
           </Link>
           <Link href={createProductRoute().url}>
             <Button className="h-10 bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs px-4 rounded-xl shadow-sm flex items-center gap-1.5">
-              <Plus size={16} /> Add Food Item
+              <Plus size={16} /> Add Product
             </Button>
           </Link>
         </div>
@@ -389,7 +390,7 @@ export default function ProductsIndex({
           </CardHeader>
           <CardContent className="px-5 pb-4 pt-0">
             <span className="text-[11px] text-slate-500 font-medium">
-              Based on active selling prices across {totalItems} menu items.
+              Based on active selling prices across {totalItems} items.
             </span>
           </CardContent>
         </Card>
@@ -448,7 +449,7 @@ export default function ProductsIndex({
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
               <Input
-                placeholder="Search food item name, barcode..."
+                placeholder="Search product name, barcode..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 h-9 text-xs bg-white rounded-xl border-slate-200"

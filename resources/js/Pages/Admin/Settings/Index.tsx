@@ -301,7 +301,7 @@ export default function SettingsIndex({
             </Badge>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Manage authorized staff & user accounts, Spatie RBAC permissions, and cafeteria food categories.
+            Manage authorized staff & user accounts, Spatie RBAC permissions, and product categories.
           </p>
         </div>
       </div>
@@ -354,7 +354,7 @@ export default function SettingsIndex({
           <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between">
               <CardDescription className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Menu Categories
+                Product Categories
               </CardDescription>
               <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
                 <FolderTree size={16} />
@@ -375,7 +375,7 @@ export default function SettingsIndex({
           <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between">
               <CardDescription className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Food Catalog Items
+                Catalog Items
               </CardDescription>
               <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
                 <Package size={16} />
@@ -400,7 +400,7 @@ export default function SettingsIndex({
             <Users size={14} className="mr-1.5" /> System Users & RBAC
           </TabsTrigger>
           <TabsTrigger value="categories" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
-            <FolderTree size={14} className="mr-1.5" /> Menu Categories
+            <FolderTree size={14} className="mr-1.5" /> Product Categories
           </TabsTrigger>
         </TabsList>
 
@@ -587,13 +587,13 @@ export default function SettingsIndex({
           </Card>
         </TabsContent>
 
-        {/* Tab 2: Menu Categories */}
+        {/* Tab 2: Product Categories */}
         <TabsContent value="categories" className="space-y-4 m-0">
           <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white p-4">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-extrabold text-sm text-slate-900">Cafeteria Menu Classifications</h3>
-                <p className="text-xs text-slate-500">Food categories used in the POS register and student portal.</p>
+                <h3 className="font-extrabold text-sm text-slate-900">Product Categories</h3>
+                <p className="text-xs text-slate-500">Product categories used in the POS register and inventory management.</p>
               </div>
               <Button
                 onClick={openCreateCategoryModal}
@@ -615,7 +615,7 @@ export default function SettingsIndex({
                     Description
                   </TableHead>
                   <TableHead className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    Food Items
+                    Products
                   </TableHead>
                   <TableHead className="text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right pr-6">
                     Actions
@@ -626,7 +626,7 @@ export default function SettingsIndex({
                 {categories.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4} className="h-36 text-center text-slate-500 text-xs">
-                      No food categories configured yet.
+                      No product categories configured yet.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -861,7 +861,7 @@ export default function SettingsIndex({
                 </div>
                 <div>
                   <DialogTitle className="text-base font-extrabold text-slate-900">
-                    {editingCategory ? `Edit Category: ${editingCategory.name}` : 'New Menu Category'}
+                    {editingCategory ? `Edit Category: ${editingCategory.name}` : 'New Product Category'}
                   </DialogTitle>
                   <DialogDescription className="text-xs text-slate-500">
                     Add or update category groupings for the canteen inventory.
@@ -938,7 +938,7 @@ export default function SettingsIndex({
               Are you sure you want to remove category <strong className="text-slate-900">{categoryToDelete?.name}</strong>?
               {categoryToDelete && categoryToDelete.products_count > 0 && (
                 <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] font-semibold">
-                  Warning: There are {categoryToDelete.products_count} food items currently assigned to this category.
+                  Warning: There are {categoryToDelete.products_count} items currently assigned to this category.
                 </div>
               )}
             </DialogDescription>

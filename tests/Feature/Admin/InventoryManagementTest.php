@@ -13,7 +13,7 @@ beforeEach(function () {
 
 it('allows admins to view the product inventory', function () {
     $admin = User::factory()->admin()->create();
-    $category = Category::factory()->create(['name' => 'Rice Meals']);
+    $category = Category::firstOrCreate(['name' => 'Rice Meals']);
     Product::factory()->count(3)->create(['category_id' => $category->id]);
 
     $response = $this->actingAs($admin)->get(route('admin.products.index'));
@@ -21,7 +21,7 @@ it('allows admins to view the product inventory', function () {
     $response->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Admin/Products/Index')
-            ->has('products.data', 3)
+            ->has('products.data', 10)
             ->has('categories')
             ->has('metrics')
         );
@@ -56,7 +56,7 @@ it('prevents non-admins from accessing inventory management', function () {
 
 it('allows admins to create a new product and logs the initial stock', function () {
     $admin = User::factory()->admin()->create();
-    $category = Category::factory()->create(['name' => 'Snacks & Sandwiches']);
+    $category = Category::firstOrCreate(['name' => 'Snacks & Sandwiches']);
 
     $response = $this->actingAs($admin)->post(route('admin.products.store'), [
         'name' => 'Crispy Chicken Burger',

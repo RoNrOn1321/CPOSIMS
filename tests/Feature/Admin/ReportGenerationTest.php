@@ -92,7 +92,7 @@ it('allows admins to view the reports dashboard with accurate sales and topup me
             ->where('metrics.voidedCount', 1)
             ->where('metrics.totalTopupsAmount', 500)
             ->where('metrics.totalTopupsCount', 1)
-            ->where('metrics.lowStockCount', 1)
+            ->where('metrics.lowStockCount', 2)
             ->has('transactions')
             ->has('topProducts')
             ->has('topups')

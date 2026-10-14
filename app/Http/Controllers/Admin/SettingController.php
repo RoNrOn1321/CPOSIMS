@@ -129,7 +129,7 @@ class SettingController extends Controller
     }
 
     /**
-     * Store a new cafeteria menu category.
+     * Store a new product category.
      */
     public function storeCategory(Request $request): RedirectResponse
     {
@@ -145,7 +145,7 @@ class SettingController extends Controller
     }
 
     /**
-     * Update an existing menu category.
+     * Update an existing product category.
      */
     public function updateCategory(Request $request, Category $category): RedirectResponse
     {
@@ -161,7 +161,7 @@ class SettingController extends Controller
     }
 
     /**
-     * Soft-delete a menu category.
+     * Soft-delete a product category.
      */
     public function destroyCategory(Category $category): RedirectResponse
     {
