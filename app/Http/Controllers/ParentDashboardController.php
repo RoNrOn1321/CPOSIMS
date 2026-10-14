@@ -24,6 +24,9 @@ class ParentDashboardController extends Controller
                         ->latest('created_at')
                         ->with(['details.product.category', 'cashier']);
                 },
+                'balanceTopups' => function ($query) {
+                    $query->latest('created_at')->take(10);
+                },
             ])
             ->get();
 
@@ -98,19 +101,30 @@ class ParentDashboardController extends Controller
                 ];
             }
 
+            $formattedTopups = $student->balanceTopups->map(function ($topup) {
+                return [
+                    'id' => $topup->id,
+                    'referenceNumber' => $topup->reference_number,
+                    'amount' => (float) $topup->amount,
+                    'previousBalance' => (float) $topup->previous_balance,
+                    'newBalance' => (float) $topup->new_balance,
+                    'createdAt' => $topup->created_at->format('M d, Y g:i A'),
+                ];
+            })->values()->all();
+
             return [
                 'id' => (int) $student->id,
                 'name' => trim("{$student->first_name} {$student->last_name}"),
                 'gradeLevel' => "{$student->grade_level} - {$student->section}",
                 'studentId' => $student->student_id_number,
                 'rfidUid' => $student->rfid_uid ?? 'N/A',
+                'status' => $student->status,
                 'balance' => (float) $student->current_balance,
                 'dailyLimit' => (float) $student->daily_spending_limit,
                 'spentToday' => round($spentToday, 2),
                 'weeklySpent' => round($weeklySpent, 2),
-                'prohibitedItems' => [],
-                'allergies' => [],
                 'transactions' => $formattedTransactions,
+                'topups' => $formattedTopups,
             ];
         })->values()->all();
 

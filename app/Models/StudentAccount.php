@@ -5,6 +5,8 @@ namespace App\Models;
 use Database\Factories\StudentAccountFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Contracts\Auditable;
 
@@ -32,13 +34,18 @@ class StudentAccount extends Model implements Auditable
     }
 
     // Connects back to the User model (Parent Dashboard)
-    public function parent()
+    public function parent(): BelongsTo
     {
         return $this->belongsTo(User::class, 'parent_id');
     }
 
-    public function transactions()
+    public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
+    }
+
+    public function balanceTopups(): HasMany
+    {
+        return $this->hasMany(BalanceTopup::class);
     }
 }

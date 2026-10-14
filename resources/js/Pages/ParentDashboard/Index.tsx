@@ -7,7 +7,6 @@ import QuickStatsGrid from './Partials/QuickStatsGrid';
 import OverviewTab from './Partials/OverviewTab';
 import MealHistoryTab from './Partials/MealHistoryTab';
 import SpendingLimitsTab from './Partials/SpendingLimitsTab';
-import DietaryRestrictionsTab from './Partials/DietaryRestrictionsTab';
 import TopUpModal from './Partials/TopUpModal';
 import EReceiptModal from './Partials/EReceiptModal';
 import { Users } from 'lucide-react';
@@ -103,7 +102,7 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
 
       {/* 3. Main Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-5">
-        <TabsList className="bg-white border border-slate-200 p-1 rounded-2xl h-12 shadow-xs grid grid-cols-4 w-full md:w-fit">
+        <TabsList className="bg-white border border-slate-200 p-1 rounded-2xl h-12 shadow-xs grid grid-cols-3 w-full md:w-fit">
           <TabsTrigger value="overview" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
             Overview & Analytics
           </TabsTrigger>
@@ -112,9 +111,6 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
           </TabsTrigger>
           <TabsTrigger value="limits" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
             Daily Allowance Limits
-          </TabsTrigger>
-          <TabsTrigger value="restrictions" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
-            Dietary & Restrictions
           </TabsTrigger>
         </TabsList>
 
@@ -138,13 +134,6 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
         {/* Tab 3: Daily Allowance Limits */}
         <TabsContent value="limits" className="m-0">
           <SpendingLimitsTab
-            student={currentStudent}
-          />
-        </TabsContent>
-
-        {/* Tab 4: Dietary Safeguards */}
-        <TabsContent value="restrictions" className="m-0">
-          <DietaryRestrictionsTab
             student={currentStudent}
           />
         </TabsContent>

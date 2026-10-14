@@ -15,6 +15,7 @@ export interface Product {
   stock: number;
   image: string;
   isPopular?: boolean;
+  barcode?: string | null;
 }
 
 const cafeteriaProducts: Product[] = [
@@ -153,7 +154,7 @@ const cafeteriaProducts: Product[] = [
   },
 ];
 
-const categories = [
+const defaultCategories = [
   { id: 'All', label: 'All Items', icon: <Utensils size={14} /> },
   { id: 'Rice Meals', label: 'Rice Meals', icon: <Flame size={14} /> },
   { id: 'Snacks & Sandwiches', label: 'Snacks & Bites', icon: <Sandwich size={14} /> },
@@ -166,30 +167,52 @@ interface ProductGridProps {
   onAddToCart: (product: Product) => void;
   searchQuery?: string;
   cartItemIds?: Set<number>;
+  products?: Product[];
+  categories?: string[];
 }
 
 export default function ProductGrid({ 
   onAddToCart, 
   searchQuery = '',
-  cartItemIds = new Set()
+  cartItemIds = new Set(),
+  products,
+  categories: categoriesProp,
 }: ProductGridProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
+  const activeProducts = useMemo(() => {
+    return products && products.length > 0 ? products : cafeteriaProducts;
+  }, [products]);
+
+  const activeCategories = useMemo(() => {
+    if (categoriesProp && categoriesProp.length > 0) {
+      return [
+        { id: 'All', label: 'All Items', icon: <Utensils size={14} /> },
+        ...categoriesProp.map(cat => ({
+          id: cat,
+          label: cat,
+          icon: <Flame size={14} />,
+        })),
+      ];
+    }
+    return defaultCategories;
+  }, [categoriesProp]);
+
   const filteredProducts = useMemo(() => {
-    return cafeteriaProducts.filter(item => {
+    return activeProducts.filter(item => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             item.category.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [selectedCategory, searchQuery]);
+  }, [activeProducts, selectedCategory, searchQuery]);
 
   return (
     <div className="h-full flex flex-col bg-slate-50/70 border-r border-slate-200 overflow-hidden">
       {/* Category Pills Header */}
       <div className="p-4 bg-white border-b border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-          {categories.map((cat) => {
+          {activeCategories.map((cat) => {
             const isActive = selectedCategory === cat.id;
             return (
               <button

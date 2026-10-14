@@ -11,9 +11,11 @@ import {
   ChevronDown, 
   Package, 
   FileText, 
+  BarChart3,
   Settings,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Users
 } from 'lucide-react';
 import { Link } from '@inertiajs/react';
 import { logout } from '@/routes';
@@ -179,12 +181,6 @@ export default function AdminLayout({
                     active={activeNav === 'limits'}
                     onClick={() => onNavigate?.('limits')}
                   />
-                  <SidebarNavItem 
-                    icon={<ShieldAlert size={18} />} 
-                    label="Dietary Restrictions" 
-                    active={activeNav === 'restrictions'}
-                    onClick={() => onNavigate?.('restrictions')}
-                  />
                 </>
               ) : (
                 <>
@@ -193,6 +189,12 @@ export default function AdminLayout({
                     label="Dashboard" 
                     active={activeNav === 'dashboard'}
                     href="/admin/products"
+                  />
+                  <SidebarNavItem 
+                    icon={<Users size={18} />} 
+                    label="Students & RFID" 
+                    active={activeNav === 'students'}
+                    href="/admin/students"
                   />
                   <SidebarNavItem 
                     icon={<Package size={18} />} 
@@ -205,6 +207,12 @@ export default function AdminLayout({
                     label="Audit Logs" 
                     active={activeNav === 'audit'}
                     href="/admin/audit-logs"
+                  />
+                  <SidebarNavItem 
+                    icon={<BarChart3 size={18} />} 
+                    label="Reports & Analytics" 
+                    active={activeNav === 'reports'}
+                    href="/admin/reports"
                   />
                   <SidebarNavItem 
                     icon={<Settings size={18} />} 

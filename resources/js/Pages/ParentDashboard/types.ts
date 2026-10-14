@@ -8,9 +8,20 @@ export interface Student {
   dailyLimit: number;
   spentToday: number;
   weeklySpent?: number;
-  prohibitedItems: string[];
-  allergies: string[];
+  status?: 'active' | 'lost_card' | 'suspended' | 'inactive';
+  prohibitedItems?: string[];
+  allergies?: string[];
   transactions?: Transaction[];
+  topups?: BalanceTopupRecord[];
+}
+
+export interface BalanceTopupRecord {
+  id: number;
+  referenceNumber: string;
+  amount: number;
+  previousBalance: number;
+  newBalance: number;
+  createdAt: string;
 }
 
 export interface TransactionItem {

@@ -2,9 +2,14 @@
 
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ProductController;
+use App\Http\Controllers\Admin\ReportController;
+use App\Http\Controllers\Admin\StudentAccountController;
+use App\Http\Controllers\BalanceTopupController;
 use App\Http\Controllers\ParentDashboardController;
 use App\Http\Controllers\ParentStudentLimitController;
+use App\Http\Controllers\ParentStudentStatusController;
 use App\Http\Controllers\PosCheckoutController;
+use App\Http\Controllers\PosController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -35,17 +40,19 @@ Route::get('/dashboard', function () {
 
 // POS Portal - Cashier & Admin Access
 Route::middleware(['auth', 'active', 'role:admin|cashier'])->prefix('pos')->name('pos.')->group(function () {
-    Route::get('/', function () {
-        return Inertia::render('POS/Index');
-    })->name('index');
-
+    Route::get('/', [PosController::class, 'index'])->name('index');
+    Route::get('/student-lookup', [PosController::class, 'lookupStudent'])->name('student.lookup');
     Route::post('/checkout', PosCheckoutController::class)->name('checkout');
+    Route::post('/topup', [BalanceTopupController::class, 'posStore'])->name('topup');
+    Route::post('/transactions/{transaction}/void', [PosController::class, 'voidTransaction'])->name('transactions.void');
 });
 
 // Parent Dashboard - Parent & Admin Access
 Route::middleware(['auth', 'active', 'role:parent|admin'])->prefix('parent')->name('parent.')->group(function () {
     Route::get('/dashboard', [ParentDashboardController::class, 'index'])->name('dashboard');
     Route::patch('/student-limits/{student}', [ParentStudentLimitController::class, 'update'])->name('student-limits.update');
+    Route::patch('/student-accounts/{student}/status', [ParentStudentStatusController::class, 'update'])->name('student-accounts.status');
+    Route::post('/student-accounts/{student}/topup', [BalanceTopupController::class, 'parentStore'])->name('student-accounts.topup');
 });
 
 // Admin Panel Routes - Admin Access
@@ -56,6 +63,11 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
 
     Route::resource('products', ProductController::class);
     Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
+    Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('/reports/export', [ReportController::class, 'export'])->name('reports.export');
+    Route::get('/students', [StudentAccountController::class, 'index'])->name('students.index');
+    Route::post('/students', [StudentAccountController::class, 'store'])->name('students.store');
+    Route::put('/students/{student}', [StudentAccountController::class, 'update'])->name('students.update');
 });
 
 // Profile Management

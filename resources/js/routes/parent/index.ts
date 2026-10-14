@@ -1,5 +1,6 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
 import studentLimits from './student-limits'
+import studentAccounts from './student-accounts'
 /**
 * @see \App\Http\Controllers\ParentDashboardController::dashboard
  * @see app/Http/Controllers/ParentDashboardController.php:16
@@ -45,6 +46,7 @@ dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 const parent = {
     dashboard: Object.assign(dashboard, dashboard),
 studentLimits: Object.assign(studentLimits, studentLimits),
+studentAccounts: Object.assign(studentAccounts, studentAccounts),
 }
 
 export default parent

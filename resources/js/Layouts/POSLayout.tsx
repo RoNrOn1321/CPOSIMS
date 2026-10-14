@@ -29,6 +29,9 @@ interface POSLayoutProps {
   cartCount?: number;
   onHoldOrdersClick?: () => void;
   heldOrdersCount?: number;
+  onReloadClick?: () => void;
+  onOrdersClick?: () => void;
+  onRefundsClick?: () => void;
 }
 
 export default function POSLayout({
@@ -37,7 +40,10 @@ export default function POSLayout({
   onSearchChange,
   cartCount = 0,
   heldOrdersCount = 0,
-  onHoldOrdersClick
+  onHoldOrdersClick,
+  onReloadClick,
+  onOrdersClick,
+  onRefundsClick,
 }: POSLayoutProps) {
   return (
     <div className="flex h-screen bg-slate-100/90 text-slate-800 overflow-hidden font-sans select-none antialiased">
@@ -66,6 +72,7 @@ export default function POSLayout({
             <NavRailItem 
               icon={<History size={20} />} 
               label="Orders" 
+              onClick={onOrdersClick}
             />
             <NavRailItem 
               icon={<Package size={20} />} 
@@ -74,6 +81,7 @@ export default function POSLayout({
             <NavRailItem 
               icon={<RotateCcw size={20} />} 
               label="Refunds" 
+              onClick={onRefundsClick || onOrdersClick}
             />
             <NavRailItem 
               icon={<Settings size={20} />} 
@@ -135,6 +143,28 @@ export default function POSLayout({
 
           {/* Right Status & Cashier Info with Logout Button */}
           <div className="flex items-center gap-3">
+            {/* Quick RFID Balance Reload Button */}
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={onReloadClick}
+              className="bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold border border-amber-300/80 rounded-xl h-10 px-3 flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            >
+              <CreditCard size={17} className="text-amber-950" />
+              <span className="text-xs font-bold">Reload RFID</span>
+            </Button>
+
+            {/* Recent Orders & Refunds View Button */}
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={onOrdersClick}
+              className="bg-white/10 hover:bg-white/20 text-white border border-white/15 rounded-xl h-10 px-3 flex items-center gap-2 cursor-pointer"
+            >
+              <History size={17} className="text-amber-300" />
+              <span className="text-xs font-semibold">Orders & Refunds</span>
+            </Button>
+
             {/* Quick Scanner & Hold Button */}
             <Button 
               variant="ghost" 
@@ -192,14 +222,17 @@ export default function POSLayout({
 function NavRailItem({ 
   icon, 
   label, 
-  active = false 
+  active = false,
+  onClick,
 }: { 
   icon: React.ReactNode; 
   label: string; 
   active?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button 
+      onClick={onClick}
       className={`flex flex-col items-center justify-center gap-1 w-full py-2.5 rounded-xl transition-all duration-200 group relative ${
         active 
           ? 'bg-[#5c1516] text-white shadow-md shadow-red-950/20' 

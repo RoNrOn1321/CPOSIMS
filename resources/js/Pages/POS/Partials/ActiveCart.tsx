@@ -36,6 +36,9 @@ export interface StudentCustomer {
   balance: number;
   dailyLimit: number;
   spentToday: number;
+  rfidUid?: string;
+  studentId?: string;
+  status?: string;
 }
 
 interface ActiveCartProps {

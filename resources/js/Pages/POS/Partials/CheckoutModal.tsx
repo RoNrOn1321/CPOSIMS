@@ -22,11 +22,32 @@ import {
   Radio,
   Loader2,
   Check,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import { StudentCustomer, CartItem } from './ActiveCart';
 import { formatCartForCheckout } from '@/Hooks/usePOSCart';
 import { checkout } from '@/routes/pos';
+import { lookup } from '@/routes/pos/student';
 import axios from 'axios';
+import ThermalReceipt from '@/Components/POS/ThermalReceipt';
+
+export interface StudentLookupData {
+  id: number;
+  student_id_number: string;
+  rfid_uid: string;
+  name: string;
+  first_name: string;
+  last_name: string;
+  grade_level: string;
+  section: string;
+  current_balance: number;
+  daily_spending_limit: number;
+  is_spending_limited: boolean;
+  spent_today: number;
+  remaining_daily_limit: number | null;
+  status: string;
+}
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -53,6 +74,11 @@ export default function CheckoutModal({
   const [successReceipt, setSuccessReceipt] = useState<any | null>(null);
   const [scanPulse, setScanPulse] = useState<boolean>(false);
 
+  // Live student account lookup state
+  const [lookupStudent, setLookupStudent] = useState<StudentLookupData | null>(null);
+  const [isLookingUp, setIsLookingUp] = useState<boolean>(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
   // Quick cash denominations in Philippine Peso
   const denominations = [50, 100, 200, 500, 1000];
   const change = Math.max(0, cashTendered - totalAmount);
@@ -64,13 +90,60 @@ export default function CheckoutModal({
       setErrorMessage(null);
       setSuccessReceipt(null);
       setIsSubmitting(false);
+      if (selectedCustomer?.rfidUid) {
+        setRfidUid(selectedCustomer.rfidUid);
+      }
     } else {
       setRfidUid('');
       setErrorMessage(null);
       setSuccessReceipt(null);
       setIsSubmitting(false);
+      setLookupStudent(null);
+      setLookupError(null);
     }
-  }, [isOpen, totalAmount]);
+  }, [isOpen, totalAmount, selectedCustomer]);
+
+  // Live student account lookup debounced query
+  useEffect(() => {
+    if (!isOpen || paymentMethod !== 'rfid') {
+      return;
+    }
+
+    const trimmed = rfidUid.trim();
+    if (trimmed.length < 3) {
+      setLookupStudent(null);
+      setLookupError(null);
+      setIsLookingUp(false);
+      return;
+    }
+
+    setIsLookingUp(true);
+    setLookupError(null);
+
+    const timer = setTimeout(async () => {
+      try {
+        const endpoint = lookup.url({ query: { identifier: trimmed } });
+        const res = await axios.get(endpoint, {
+          headers: { Accept: 'application/json' },
+        });
+        if (res.status === 200) {
+          setLookupStudent(res.data);
+          setLookupError(null);
+        }
+      } catch (err: any) {
+        setLookupStudent(null);
+        if (err.response?.status === 404) {
+          setLookupError('No student account found for this RFID / ID.');
+        } else {
+          setLookupError(err.response?.data?.message || 'Error looking up student account.');
+        }
+      } finally {
+        setIsLookingUp(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [rfidUid, isOpen, paymentMethod]);
 
   // RFID Scanner Event Listener (USB Hardware Keyboard Emulator)
   useEffect(() => {
@@ -128,9 +201,31 @@ export default function CheckoutModal({
     }
 
     // Cashless RFID Validation
-    if (paymentMethod === 'rfid' && !rfidUid.trim()) {
-      setErrorMessage('Please tap or enter a student RFID card before confirming checkout.');
-      return;
+    if (paymentMethod === 'rfid') {
+      if (!rfidUid.trim()) {
+        setErrorMessage('Please tap or enter a student RFID card before confirming checkout.');
+        return;
+      }
+
+      if (lookupStudent?.status === 'lost_card') {
+        setErrorMessage('Transaction blocked: Student RFID card is frozen / reported lost.');
+        return;
+      }
+
+      if (lookupStudent && ['suspended', 'inactive'].includes(lookupStudent.status)) {
+        setErrorMessage(`Transaction blocked: Student account is ${lookupStudent.status}.`);
+        return;
+      }
+
+      if (lookupStudent && lookupStudent.current_balance < totalAmount) {
+        setErrorMessage('Insufficient balance on student RFID card.');
+        return;
+      }
+
+      if (lookupStudent && lookupStudent.is_spending_limited && lookupStudent.remaining_daily_limit !== null && lookupStudent.remaining_daily_limit < totalAmount) {
+        setErrorMessage('Daily transaction limit exceeded for this student.');
+        return;
+      }
     }
 
     if (!cartItems || cartItems.length === 0) {
@@ -184,7 +279,7 @@ export default function CheckoutModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] p-0 overflow-hidden rounded-2xl border-0 shadow-2xl bg-white">
+      <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white">
         {/* Header */}
         <div className="bg-[#5c1516] text-white p-6 relative">
           <DialogHeader className="text-left space-y-1">
@@ -230,53 +325,37 @@ export default function CheckoutModal({
           )}
 
           {successReceipt ? (
-            /* Success Receipt Display */
-            <div className="py-4 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-200">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center animate-bounce">
-                <CheckCircle2 size={36} />
+            /* Success Thermal Receipt Display */
+            <div className="py-2 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-200">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                <CheckCircle2 size={28} />
               </div>
               <div className="space-y-0.5">
-                <h4 className="font-extrabold text-slate-800 text-lg">Transaction Complete!</h4>
-                <p className="text-xs text-slate-500">Official canteen receipt registered.</p>
+                <h4 className="font-extrabold text-slate-800 text-base">Transaction Successful!</h4>
+                <p className="text-xs text-slate-500">Official canteen receipt ready for 58mm thermal printing.</p>
               </div>
 
-              {/* Receipt Summary Card */}
-              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-left space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-semibold">Receipt Number:</span>
-                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    {successReceipt.receipt_number}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-semibold">Payment Mode:</span>
-                  <span className="uppercase font-bold text-[#5c1516]">{successReceipt.payment_method}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-semibold">Total Paid:</span>
-                  <span className="font-bold text-slate-900">{formatMoney(successReceipt.total_amount)}</span>
-                </div>
-                {successReceipt.student && (
-                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
-                    <span className="text-slate-500 font-semibold">Remaining Balance:</span>
-                    <span className="font-bold text-emerald-700">
-                      {formatMoney(successReceipt.student.remaining_balance)}
-                    </span>
-                  </div>
-                )}
-                {successReceipt.change_amount > 0 && (
-                  <div className="flex justify-between pt-1.5 border-t border-slate-200">
-                    <span className="text-slate-500 font-semibold">Change Returned:</span>
-                    <span className="font-bold text-emerald-700">
-                      {formatMoney(successReceipt.change_amount)}
-                    </span>
-                  </div>
-                )}
-              </div>
+              {/* Thermal Receipt Paper Card Component */}
+              <ThermalReceipt
+                type="sale"
+                receiptNumber={successReceipt.receipt_number}
+                createdAt={successReceipt.created_at}
+                cashierName={successReceipt.cashier}
+                customerName={successReceipt.student ? successReceipt.student.name : (selectedCustomer?.name || 'Walk-in Customer')}
+                studentIdNumber={successReceipt.student?.student_id_number}
+                paymentMethod={successReceipt.payment_method}
+                items={successReceipt.items || []}
+                totalAmount={successReceipt.total_amount}
+                amountTendered={successReceipt.amount_tendered}
+                changeAmount={successReceipt.change_amount}
+                newBalance={successReceipt.student ? successReceipt.student.remaining_balance : undefined}
+                showPrintButton={true}
+              />
 
               <Button
+                variant="outline"
                 onClick={onClose}
-                className="w-full bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 rounded-xl shadow-md"
+                className="w-full text-slate-700 font-bold text-xs h-9 rounded-xl border-slate-300 hover:bg-slate-50"
               >
                 Close & Return to POS
               </Button>
@@ -403,21 +482,40 @@ export default function CheckoutModal({
                   <div className="flex flex-col items-center text-center space-y-1.5">
                     <div
                       className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                        rfidUid
+                        lookupStudent?.status === 'lost_card'
+                          ? 'bg-red-100 text-red-700 ring-2 ring-red-500'
+                          : lookupStudent
                           ? 'bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500'
                           : scanPulse
                           ? 'bg-amber-200 text-amber-900 ring-4 ring-amber-300'
                           : 'bg-amber-100 text-amber-800 animate-pulse'
                       }`}
                     >
-                      {rfidUid ? <Check size={22} /> : <CreditCard size={22} />}
+                      {lookupStudent?.status === 'lost_card' ? (
+                        <ShieldAlert size={22} />
+                      ) : lookupStudent ? (
+                        <Check size={22} />
+                      ) : isLookingUp ? (
+                        <Loader2 size={22} className="animate-spin" />
+                      ) : (
+                        <CreditCard size={22} />
+                      )}
                     </div>
 
                     <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                      {rfidUid ? (
+                      {isLookingUp ? (
                         <>
-                          <span className="text-emerald-700">Card Captured</span>
+                          <Loader2 size={14} className="animate-spin text-amber-600" />
+                          <span>Verifying Student Account...</span>
                         </>
+                      ) : lookupStudent?.status === 'lost_card' ? (
+                        <span className="text-red-700 font-extrabold flex items-center gap-1">
+                          <ShieldAlert size={14} /> Card Frozen (Reported Lost)
+                        </span>
+                      ) : lookupStudent ? (
+                        <span className="text-emerald-700 flex items-center gap-1">
+                          <ShieldCheck size={14} /> Account Verified
+                        </span>
                       ) : (
                         <>
                           <Radio size={14} className="animate-spin text-amber-600" />
@@ -427,14 +525,16 @@ export default function CheckoutModal({
                     </h5>
 
                     <p className="text-[11px] text-slate-500 max-w-xs">
-                      {selectedCustomer
-                        ? `Account: ${selectedCustomer.name} (Balance: ${formatMoney(selectedCustomer.balance)})`
-                        : 'Scanner acts automatically as keyboard input.'}
+                      {lookupStudent
+                        ? `${lookupStudent.name} (${lookupStudent.student_id_number})`
+                        : selectedCustomer
+                        ? `Selected: ${selectedCustomer.name} (Balance: ${formatMoney(selectedCustomer.balance)})`
+                        : 'Hardware scanner inputs automatically or enter UID manually below.'}
                     </p>
                   </div>
 
                   {/* RFID Input Field (Keyboard Scanner or Manual Entry) */}
-                  <div className="space-y-1 pt-1">
+                  <div className="space-y-2 pt-1">
                     <div className="flex items-center gap-2">
                       <Input
                         data-manual-rfid="true"
@@ -447,7 +547,11 @@ export default function CheckoutModal({
                           if (errorMessage) setErrorMessage(null);
                         }}
                         className={`font-mono text-center font-bold tracking-wider text-xs h-9 bg-white transition-all ${
-                          rfidUid ? 'border-emerald-500 ring-1 ring-emerald-500' : ''
+                          lookupStudent?.status === 'lost_card'
+                            ? 'border-red-500 ring-1 ring-red-500 text-red-700'
+                            : lookupStudent
+                            ? 'border-emerald-500 ring-1 ring-emerald-500'
+                            : ''
                         }`}
                       />
                       {rfidUid && (
@@ -456,17 +560,88 @@ export default function CheckoutModal({
                           variant="ghost"
                           size="sm"
                           disabled={isSubmitting}
-                          onClick={() => setRfidUid('')}
+                          onClick={() => {
+                            setRfidUid('');
+                            setLookupStudent(null);
+                            setLookupError(null);
+                          }}
                           className="h-9 px-2 text-[11px] text-slate-400 hover:text-slate-600"
                         >
                           Clear
                         </Button>
                       )}
                     </div>
-                    {rfidUid && (
-                      <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700 font-semibold">
-                        <CheckCircle2 size={12} />
-                        <span>Ready to deduct {formatMoney(totalAmount)} from card</span>
+
+                    {/* Lookup Error Banner */}
+                    {lookupError && (
+                      <div className="p-2.5 rounded-lg bg-red-100/80 border border-red-200 text-red-800 text-[11px] flex items-center gap-1.5 font-medium">
+                        <AlertTriangle size={14} className="shrink-0 text-red-600" />
+                        <span>{lookupError}</span>
+                      </div>
+                    )}
+
+                    {/* Frozen / Lost Card Alert Banner */}
+                    {lookupStudent?.status === 'lost_card' && (
+                      <div className="p-3 rounded-xl bg-red-100 border border-red-300 text-red-900 space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-red-800">
+                          <ShieldAlert size={15} className="text-red-700" />
+                          <span>CARD FROZEN &bull; TRANSACTION BLOCKED</span>
+                        </div>
+                        <p className="text-[11px] text-red-700 leading-tight">
+                          This RFID card is reported lost and frozen by the parent. Canteen purchases and reloads are blocked.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Active Student Summary Box */}
+                    {lookupStudent && lookupStudent.status === 'active' && (
+                      <div className="p-3 rounded-xl bg-white border border-emerald-200/80 shadow-2xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-extrabold text-slate-800 text-xs">{lookupStudent.name}</span>
+                            <p className="text-[10px] text-slate-500">
+                              {lookupStudent.student_id_number} &bull; {lookupStudent.grade_level} - {lookupStudent.section}
+                            </p>
+                          </div>
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[9px] font-bold">
+                            Active Card
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-100">
+                          <div className="p-1.5 rounded-lg bg-emerald-50/70">
+                            <span className="text-[9px] font-semibold text-emerald-800 uppercase block">Balance</span>
+                            <strong className="text-xs font-black text-emerald-700">{formatMoney(lookupStudent.current_balance)}</strong>
+                          </div>
+                          <div className="p-1.5 rounded-lg bg-slate-50">
+                            <span className="text-[9px] font-semibold text-slate-500 uppercase block">Daily Limit Left</span>
+                            <strong className="text-xs font-black text-slate-800">
+                              {lookupStudent.is_spending_limited && lookupStudent.remaining_daily_limit !== null
+                                ? formatMoney(lookupStudent.remaining_daily_limit)
+                                : 'No Limit'}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {lookupStudent.current_balance < totalAmount && (
+                          <p className="text-[11px] text-red-600 font-semibold flex items-center gap-1 pt-0.5">
+                            <AlertTriangle size={12} /> Insufficient balance for this order.
+                          </p>
+                        )}
+
+                        {lookupStudent.is_spending_limited && lookupStudent.remaining_daily_limit !== null && lookupStudent.remaining_daily_limit < totalAmount && (
+                          <p className="text-[11px] text-red-600 font-semibold flex items-center gap-1 pt-0.5">
+                            <AlertTriangle size={12} /> Exceeds student daily allowance limit.
+                          </p>
+                        )}
+
+                        {lookupStudent.current_balance >= totalAmount &&
+                          (!lookupStudent.is_spending_limited || lookupStudent.remaining_daily_limit === null || lookupStudent.remaining_daily_limit >= totalAmount) && (
+                            <div className="flex items-center justify-center gap-1 text-[11px] text-emerald-700 font-semibold pt-0.5">
+                              <CheckCircle2 size={12} />
+                              <span>Ready to deduct {formatMoney(totalAmount)} from card</span>
+                            </div>
+                          )}
                       </div>
                     )}
                   </div>
@@ -505,7 +680,15 @@ export default function CheckoutModal({
               disabled={
                 isSubmitting ||
                 (paymentMethod === 'cash' && cashTendered < totalAmount) ||
-                (paymentMethod === 'rfid' && !rfidUid.trim()) ||
+                (paymentMethod === 'rfid' && (
+                  !rfidUid.trim() ||
+                  isLookingUp ||
+                  lookupStudent?.status === 'lost_card' ||
+                  lookupStudent?.status === 'suspended' ||
+                  lookupStudent?.status === 'inactive' ||
+                  (lookupStudent !== null && lookupStudent.current_balance < totalAmount) ||
+                  (lookupStudent !== null && lookupStudent.is_spending_limited && lookupStudent.remaining_daily_limit !== null && lookupStudent.remaining_daily_limit < totalAmount)
+                )) ||
                 paymentMethod === 'qr'
               }
               className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-10 px-5 rounded-xl shadow-md flex items-center gap-2 disabled:opacity-50"

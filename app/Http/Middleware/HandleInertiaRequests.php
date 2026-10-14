@@ -47,6 +47,12 @@ class HandleInertiaRequests extends Middleware
                     'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
                 ] : null,
             ],
+            'flash' => [
+                'success' => fn () => $request->session()->get('success'),
+                'error' => fn () => $request->session()->get('error'),
+                'reference_number' => fn () => $request->session()->get('reference_number'),
+                'topup' => fn () => $request->session()->get('topup'),
+            ],
         ];
     }
 }
