@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ReportController;
+use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\StudentAccountController;
 use App\Http\Controllers\BalanceTopupController;
 use App\Http\Controllers\ParentDashboardController;
@@ -68,6 +69,12 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::get('/students', [StudentAccountController::class, 'index'])->name('students.index');
     Route::post('/students', [StudentAccountController::class, 'store'])->name('students.store');
     Route::put('/students/{student}', [StudentAccountController::class, 'update'])->name('students.update');
+    Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
+    Route::post('/settings/users', [SettingController::class, 'storeUser'])->name('settings.users.store');
+    Route::put('/settings/users/{user}', [SettingController::class, 'updateUser'])->name('settings.users.update');
+    Route::post('/settings/categories', [SettingController::class, 'storeCategory'])->name('settings.categories.store');
+    Route::put('/settings/categories/{category}', [SettingController::class, 'updateCategory'])->name('settings.categories.update');
+    Route::delete('/settings/categories/{category}', [SettingController::class, 'destroyCategory'])->name('settings.categories.destroy');
 });
 
 // Profile Management

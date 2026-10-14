@@ -5,6 +5,7 @@ import ProductGrid, { Product } from './Partials/ProductGrid';
 import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
 import CheckoutModal from './Partials/CheckoutModal';
 import PosTopUpModal from './Partials/PosTopUpModal';
+import PosHardwareDiagnosticsModal from './Partials/PosHardwareDiagnosticsModal';
 import {
   Dialog,
   DialogContent,
@@ -101,6 +102,7 @@ export default function POSIndex({
   const [isHeldOrdersModalOpen, setIsHeldOrdersModalOpen] = useState<boolean>(false);
   const [isReloadModalOpen, setIsReloadModalOpen] = useState<boolean>(false);
   const [isOrdersModalOpen, setIsOrdersModalOpen] = useState<boolean>(false);
+  const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState<boolean>(false);
 
   // Recent transactions list state
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>(initialTransactions);
@@ -275,6 +277,7 @@ export default function POSIndex({
       onReloadClick={() => setIsReloadModalOpen(true)}
       onOrdersClick={() => setIsOrdersModalOpen(true)}
       onRefundsClick={() => setIsOrdersModalOpen(true)}
+      onConfigClick={() => setIsDiagnosticsModalOpen(true)}
       cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
     >
       <div className="flex h-full w-full overflow-hidden">
@@ -648,6 +651,13 @@ export default function POSIndex({
       <PosTopUpModal
         isOpen={isReloadModalOpen}
         onClose={() => setIsReloadModalOpen(false)}
+      />
+
+      {/* Terminal & Hardware Diagnostics Dialog */}
+      <PosHardwareDiagnosticsModal
+        isOpen={isDiagnosticsModalOpen}
+        onClose={() => setIsDiagnosticsModalOpen(false)}
+        products={products}
       />
     </POSLayout>
   );

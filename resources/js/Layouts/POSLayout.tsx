@@ -32,6 +32,7 @@ interface POSLayoutProps {
   onReloadClick?: () => void;
   onOrdersClick?: () => void;
   onRefundsClick?: () => void;
+  onConfigClick?: () => void;
 }
 
 export default function POSLayout({
@@ -44,6 +45,7 @@ export default function POSLayout({
   onReloadClick,
   onOrdersClick,
   onRefundsClick,
+  onConfigClick,
 }: POSLayoutProps) {
   return (
     <div className="flex h-screen bg-slate-100/90 text-slate-800 overflow-hidden font-sans select-none antialiased">
@@ -86,6 +88,7 @@ export default function POSLayout({
             <NavRailItem 
               icon={<Settings size={20} />} 
               label="Config" 
+              onClick={onConfigClick}
             />
           </nav>
         </div>

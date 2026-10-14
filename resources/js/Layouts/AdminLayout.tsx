@@ -218,6 +218,7 @@ export default function AdminLayout({
                     icon={<Settings size={18} />} 
                     label="System Settings" 
                     active={activeNav === 'settings'}
+                    href="/admin/settings"
                   />
                 </>
               )}
