@@ -1,6 +1,8 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../wayfinder'
+import studentLimits from './student-limits'
 /**
- * @see routes/web.php:43
+* @see \App\Http\Controllers\ParentDashboardController::dashboard
+ * @see app/Http/Controllers/ParentDashboardController.php:16
  * @route '/parent/dashboard'
  */
 export const dashboard = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -14,7 +16,8 @@ dashboard.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:43
+* @see \App\Http\Controllers\ParentDashboardController::dashboard
+ * @see app/Http/Controllers/ParentDashboardController.php:16
  * @route '/parent/dashboard'
  */
 dashboard.url = (options?: RouteQueryOptions) => {
@@ -22,7 +25,8 @@ dashboard.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:43
+* @see \App\Http\Controllers\ParentDashboardController::dashboard
+ * @see app/Http/Controllers/ParentDashboardController.php:16
  * @route '/parent/dashboard'
  */
 dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -30,7 +34,8 @@ dashboard.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:43
+* @see \App\Http\Controllers\ParentDashboardController::dashboard
+ * @see app/Http/Controllers/ParentDashboardController.php:16
  * @route '/parent/dashboard'
  */
 dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -39,6 +44,7 @@ dashboard.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 })
 const parent = {
     dashboard: Object.assign(dashboard, dashboard),
+studentLimits: Object.assign(studentLimits, studentLimits),
 }
 
 export default parent

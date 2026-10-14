@@ -1,6 +1,7 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
- * @see routes/web.php:66
+* @see \App\Http\Controllers\Admin\AuditLogController::index
+ * @see app/Http/Controllers/Admin/AuditLogController.php:17
  * @route '/admin/audit-logs'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -14,7 +15,8 @@ index.definition = {
 } satisfies RouteDefinition<["get","head"]>
 
 /**
- * @see routes/web.php:66
+* @see \App\Http\Controllers\Admin\AuditLogController::index
+ * @see app/Http/Controllers/Admin/AuditLogController.php:17
  * @route '/admin/audit-logs'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -22,7 +24,8 @@ index.url = (options?: RouteQueryOptions) => {
 }
 
 /**
- * @see routes/web.php:66
+* @see \App\Http\Controllers\Admin\AuditLogController::index
+ * @see app/Http/Controllers/Admin/AuditLogController.php:17
  * @route '/admin/audit-logs'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -30,7 +33,8 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
     method: 'get',
 })
 /**
- * @see routes/web.php:66
+* @see \App\Http\Controllers\Admin\AuditLogController::index
+ * @see app/Http/Controllers/Admin/AuditLogController.php:17
  * @route '/admin/audit-logs'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({

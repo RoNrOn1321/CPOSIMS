@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\ParentDashboardController;
 use App\Http\Controllers\ParentStudentLimitController;
 use App\Http\Controllers\PosCheckoutController;
@@ -52,21 +54,8 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
         return redirect()->route('admin.products.index');
     });
 
-    Route::get('/products', function () {
-        return Inertia::render('Admin/Products/Index');
-    })->name('products.index');
-
-    Route::get('/products/create', function () {
-        return Inertia::render('Admin/Products/Create');
-    })->name('products.create');
-
-    Route::get('/products/edit', function () {
-        return Inertia::render('Admin/Products/Edit');
-    })->name('products.edit');
-
-    Route::get('/audit-logs', function () {
-        return Inertia::render('Admin/AuditLogs/Index');
-    })->name('audit-logs.index');
+    Route::resource('products', ProductController::class);
+    Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
 });
 
 // Profile Management

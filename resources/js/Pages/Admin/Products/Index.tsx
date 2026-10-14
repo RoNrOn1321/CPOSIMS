@@ -21,273 +21,142 @@ import {
   DialogFooter 
 } from '@/Components/ui/dialog';
 import { formatMoney } from '@/lib/formatters';
-import { Link } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
 import { 
   Plus, 
   Search, 
-  SlidersHorizontal, 
   ArrowUpDown, 
   Edit, 
   Trash2, 
   Package, 
   AlertTriangle, 
   TrendingUp, 
-  CheckCircle2, 
   RefreshCw,
   ExternalLink
 } from 'lucide-react';
 import {
   useReactTable,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   ColumnDef,
   flexRender,
   SortingState,
 } from '@tanstack/react-table';
+import { create as createProductRoute, edit as editProductRoute, update as updateProductRoute, destroy as destroyProductRoute } from '@/routes/admin/products';
 
 export interface ProductItem {
   id: number;
   name: string;
-  category: string;
-  sku: string;
-  costPrice: number;
-  price: number;
-  stock: number;
-  minThreshold: number;
-  calories: number;
-  image: string;
-  isActive: boolean;
+  category_id: number | null;
+  barcode: string | null;
+  price: number | string;
+  cost: number | string;
+  stock_quantity: number;
+  reorder_level: number;
+  status: 'active' | 'inactive';
+  category?: {
+    id: number;
+    name: string;
+  } | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
-const initialProducts: ProductItem[] = [
-  {
-    id: 1,
-    name: 'Chicken Adobo Rice Bowl',
-    category: 'Rice Meals',
-    sku: 'STCT-MEAL-001',
-    costPrice: 45.0,
-    price: 70.0,
-    stock: 24,
-    minThreshold: 15,
-    calories: 450,
-    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 2,
-    name: 'Pork Sinigang with Steamed Rice',
-    category: 'Rice Meals',
-    sku: 'STCT-MEAL-002',
-    costPrice: 50.0,
-    price: 75.0,
-    stock: 18,
-    minThreshold: 15,
-    calories: 480,
-    image: 'https://images.unsplash.com/photo-1547496502-affa22d38842?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 3,
-    name: 'Beef Tapa with Egg & Garlic Rice',
-    category: 'Rice Meals',
-    sku: 'STCT-MEAL-003',
-    costPrice: 55.0,
-    price: 85.0,
-    stock: 8,
-    minThreshold: 15,
-    calories: 520,
-    image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 4,
-    name: 'Sweet Style Spaghetti with Cheese',
-    category: 'Rice Meals',
-    sku: 'STCT-MEAL-004',
-    costPrice: 30.0,
-    price: 50.0,
-    stock: 30,
-    minThreshold: 20,
-    calories: 380,
-    image: 'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 5,
-    name: 'Canteen Beef Burger with Cheese',
-    category: 'Snacks & Sandwiches',
-    sku: 'STCT-SNCK-001',
-    costPrice: 28.0,
-    price: 45.0,
-    stock: 40,
-    minThreshold: 20,
-    calories: 390,
-    image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 6,
-    name: 'Ham & Egg Toasted Sandwich',
-    category: 'Snacks & Sandwiches',
-    sku: 'STCT-SNCK-002',
-    costPrice: 22.0,
-    price: 35.0,
-    stock: 35,
-    minThreshold: 15,
-    calories: 290,
-    image: 'https://images.unsplash.com/photo-1525351484163-7529414344d8?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 7,
-    name: 'Crispy Lumpiang Shanghai (3 pcs)',
-    category: 'Snacks & Sandwiches',
-    sku: 'STCT-SNCK-003',
-    costPrice: 18.0,
-    price: 30.0,
-    stock: 5,
-    minThreshold: 20,
-    calories: 220,
-    image: 'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 8,
-    name: 'Fresh Ice-Cold Calamansi Juice',
-    category: 'Beverages',
-    sku: 'STCT-DRNK-001',
-    costPrice: 10.0,
-    price: 20.0,
-    stock: 60,
-    minThreshold: 30,
-    calories: 90,
-    image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 9,
-    name: 'Chilled Fresh Buko Juice in Bottle',
-    category: 'Beverages',
-    sku: 'STCT-DRNK-002',
-    costPrice: 18.0,
-    price: 30.0,
-    stock: 25,
-    minThreshold: 20,
-    calories: 110,
-    image: 'https://images.unsplash.com/photo-1544253109-88373249007c?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 10,
-    name: 'Dutch Chocolate Milk (250ml)',
-    category: 'Beverages',
-    sku: 'STCT-DRNK-003',
-    costPrice: 19.0,
-    price: 28.0,
-    stock: 45,
-    minThreshold: 25,
-    calories: 160,
-    image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 11,
-    name: 'Fresh Fruit Cup (Melon & Watermelon)',
-    category: 'Healthy',
-    sku: 'STCT-HLTH-001',
-    costPrice: 20.0,
-    price: 35.0,
-    stock: 20,
-    minThreshold: 10,
-    calories: 95,
-    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 12,
-    name: 'Theresian Cheese Ensaymada',
-    category: 'Bakery',
-    sku: 'STCT-BKRY-001',
-    costPrice: 14.0,
-    price: 25.0,
-    stock: 30,
-    minThreshold: 15,
-    calories: 210,
-    image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 13,
-    name: 'Warm Banana Bread Slice',
-    category: 'Bakery',
-    sku: 'STCT-BKRY-002',
-    costPrice: 14.0,
-    price: 25.0,
-    stock: 3,
-    minThreshold: 15,
-    calories: 190,
-    image: 'https://images.unsplash.com/photo-1607958996333-41aef7caefaa?w=400&q=80',
-    isActive: true,
-  },
-  {
-    id: 14,
-    name: 'Purified Water (500ml)',
-    category: 'Beverages',
-    sku: 'STCT-DRNK-004',
-    costPrice: 8.0,
-    price: 15.0,
-    stock: 120,
-    minThreshold: 40,
-    calories: 0,
-    image: 'https://images.unsplash.com/photo-1523362628745-0c100150b504?w=400&q=80',
-    isActive: true,
-  },
-];
+export interface PaginatedData<T> {
+  data: T[];
+  current_page: number;
+  last_page: number;
+  total: number;
+  from: number | null;
+  to: number | null;
+  prev_page_url: string | null;
+  next_page_url: string | null;
+}
 
-export default function ProductsIndex() {
-  const [data, setData] = useState<ProductItem[]>(initialProducts);
-  const [globalFilter, setGlobalFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
+interface ProductsIndexProps {
+  products: PaginatedData<ProductItem>;
+  categories?: Array<{ id: number; name: string }>;
+  metrics?: {
+    totalValuation: number;
+    lowStockCount: number;
+    totalItems: number;
+  };
+  filters?: {
+    search?: string;
+    category?: string;
+  };
+}
+
+const categoryPlaceholders: Record<string, string> = {
+  'Rice Meals': 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
+  'Snacks & Sandwiches': 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=80',
+  'Beverages': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&q=80',
+  'Bakery': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
+  'Healthy': 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
+};
+
+export default function ProductsIndex({ 
+  products, 
+  categories = [], 
+  metrics,
+  filters = {} 
+}: ProductsIndexProps) {
+  const [searchTerm, setSearchTerm] = useState(filters.search ?? '');
+  const [activeCategory, setActiveCategory] = useState(filters.category ?? 'All');
   const [sorting, setSorting] = useState<SortingState>([]);
 
   // Restock Quick Modal state
   const [restockProduct, setRestockProduct] = useState<ProductItem | null>(null);
   const [addQty, setAddQty] = useState<number>(20);
+  const [isRestocking, setIsRestocking] = useState(false);
 
-  // Filtered data based on category dropdown
-  const filteredData = useMemo(() => {
-    if (categoryFilter === 'All') return data;
-    if (categoryFilter === 'LowStock') return data.filter(p => p.stock <= p.minThreshold);
-    return data.filter(p => p.category === categoryFilter);
-  }, [data, categoryFilter]);
+  // Trigger search filter
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    router.get('/admin/products', {
+      search: searchTerm || undefined,
+      category: activeCategory !== 'All' ? activeCategory : undefined,
+    }, { preserveState: true });
+  };
 
-  // Total metrics
-  const totalValuation = useMemo(() => {
-    return data.reduce((sum, item) => sum + (item.price * item.stock), 0);
-  }, [data]);
-
-  const lowStockCount = useMemo(() => {
-    return data.filter(p => p.stock <= p.minThreshold).length;
-  }, [data]);
+  const handleCategorySelect = (cat: string) => {
+    setActiveCategory(cat);
+    router.get('/admin/products', {
+      search: searchTerm || undefined,
+      category: cat !== 'All' ? cat : undefined,
+    }, { preserveState: true });
+  };
 
   // Quick Restock Handler
   const handleConfirmRestock = () => {
     if (!restockProduct) return;
-    setData(prev => prev.map(p => {
-      if (p.id === restockProduct.id) {
-        return { ...p, stock: p.stock + addQty };
-      }
-      return p;
-    }));
-    setRestockProduct(null);
+    setIsRestocking(true);
+
+    router.patch(updateProductRoute(restockProduct.id).url, {
+      name: restockProduct.name,
+      category_id: restockProduct.category_id,
+      barcode: restockProduct.barcode,
+      price: restockProduct.price,
+      cost: restockProduct.cost,
+      stock_quantity: Number(restockProduct.stock_quantity) + addQty,
+      reorder_level: restockProduct.reorder_level,
+      status: restockProduct.status,
+      remarks: `Quick restock (+${addQty} pcs)`,
+    }, {
+      onSuccess: () => {
+        setIsRestocking(false);
+        setRestockProduct(null);
+      },
+      onError: () => {
+        setIsRestocking(false);
+      },
+    });
   };
 
   // Quick Delete Handler
   const handleDeleteProduct = (id: number) => {
     if (confirm('Are you sure you want to remove this item from the cafeteria inventory?')) {
-      setData(prev => prev.filter(p => p.id !== id));
+      router.delete(destroyProductRoute(id).url);
     }
   };
 
@@ -306,17 +175,20 @@ export default function ProductsIndex() {
       ),
       cell: ({ row }) => {
         const item = row.original;
+        const catName = item.category?.name || 'Snacks & Sandwiches';
+        const imgUrl = categoryPlaceholders[catName] || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
+
         return (
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
-              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+              <img src={imgUrl} alt={item.name} className="w-full h-full object-cover" />
             </div>
             <div>
               <div className="font-extrabold text-xs text-slate-800 leading-snug">
                 {item.name}
               </div>
               <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                {item.sku} &bull; {item.calories} kcal
+                {item.barcode || 'NO-BARCODE'}
               </div>
             </div>
           </div>
@@ -328,7 +200,7 @@ export default function ProductsIndex() {
       header: 'Category',
       cell: ({ row }) => (
         <Badge variant="outline" className="text-[10px] font-bold border-slate-200 bg-slate-50 text-slate-700 px-2 py-0.5">
-          {row.getValue('category')}
+          {row.original.category?.name || 'Uncategorized'}
         </Badge>
       ),
     },
@@ -344,9 +216,9 @@ export default function ProductsIndex() {
         </button>
       ),
       cell: ({ row }) => {
-        const price = row.original.price;
-        const cost = row.original.costPrice;
-        const margin = Math.round(((price - cost) / price) * 100);
+        const price = Number(row.original.price);
+        const cost = Number(row.original.cost);
+        const margin = price > 0 ? Math.round(((price - cost) / price) * 100) : 0;
         return (
           <div>
             <div className="font-extrabold text-xs text-[#5c1516]">
@@ -360,7 +232,7 @@ export default function ProductsIndex() {
       },
     },
     {
-      accessorKey: 'stock',
+      accessorKey: 'stock_quantity',
       header: ({ column }) => (
         <button
           className="flex items-center gap-1 font-bold text-xs text-slate-700 hover:text-slate-900"
@@ -372,12 +244,12 @@ export default function ProductsIndex() {
       ),
       cell: ({ row }) => {
         const item = row.original;
-        const isLow = item.stock <= item.minThreshold;
+        const isLow = Number(item.stock_quantity) <= Number(item.reorder_level);
         return (
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className={`font-black text-xs ${isLow ? 'text-amber-700' : 'text-slate-800'}`}>
-                {item.stock} pcs
+                {item.stock_quantity} pcs
               </span>
               {isLow && (
                 <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[9px] px-1.5 py-0 font-bold">
@@ -388,7 +260,7 @@ export default function ProductsIndex() {
             <div className="w-24 bg-slate-100 rounded-full h-1.5 overflow-hidden">
               <div 
                 className={`h-full rounded-full ${isLow ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                style={{ width: `${Math.min(100, (item.stock / 60) * 100)}%` }}
+                style={{ width: `${Math.min(100, (Number(item.stock_quantity) / 60) * 100)}%` }}
               />
             </div>
           </div>
@@ -396,14 +268,17 @@ export default function ProductsIndex() {
       },
     },
     {
-      accessorKey: 'isActive',
+      accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => (
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span>Active</span>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const isActive = row.original.status === 'active';
+        return (
+          <div className={`flex items-center gap-1.5 text-xs font-semibold ${isActive ? 'text-emerald-700' : 'text-slate-400'}`}>
+            <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+            <span>{isActive ? 'Active' : 'Inactive'}</span>
+          </div>
+        );
+      },
     },
     {
       id: 'actions',
@@ -424,7 +299,7 @@ export default function ProductsIndex() {
               <RefreshCw size={12} className="mr-1 text-amber-600" /> Restock
             </Button>
 
-            <Link href="/admin/products/edit">
+            <Link href={editProductRoute(item.id).url}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -450,24 +325,19 @@ export default function ProductsIndex() {
 
   // TanStack Table Instance
   const table = useReactTable({
-    data: filteredData,
+    data: products.data,
     columns,
     state: {
       sorting,
-      globalFilter,
     },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: {
-      pagination: {
-        pageSize: 8,
-      },
-    },
   });
+
+  const totalValuation = metrics?.totalValuation ?? products.data.reduce((sum, item) => sum + (Number(item.price) * Number(item.stock_quantity)), 0);
+  const lowStockCount = metrics?.lowStockCount ?? products.data.filter(p => Number(p.stock_quantity) <= Number(p.reorder_level)).length;
+  const totalItems = metrics?.totalItems ?? products.total;
 
   return (
     <AdminLayout portal="admin" activeNav="products">
@@ -479,7 +349,7 @@ export default function ProductsIndex() {
               Cafeteria Products & Inventory
             </h1>
             <Badge className="bg-[#5c1516] text-white font-extrabold text-[10px]">
-              {data.length} Total Items
+              {totalItems} Total Items
             </Badge>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -493,7 +363,7 @@ export default function ProductsIndex() {
               <ExternalLink size={14} className="mr-1.5 text-slate-500" /> Open POS Register
             </Button>
           </Link>
-          <Link href="/admin/products/create">
+          <Link href={createProductRoute().url}>
             <Button className="h-10 bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs px-4 rounded-xl shadow-sm flex items-center gap-1.5">
               <Plus size={16} /> Add Food Item
             </Button>
@@ -519,7 +389,7 @@ export default function ProductsIndex() {
           </CardHeader>
           <CardContent className="px-5 pb-4 pt-0">
             <span className="text-[11px] text-slate-500 font-medium">
-              Based on active selling prices across {data.length} menu items.
+              Based on active selling prices across {totalItems} menu items.
             </span>
           </CardContent>
         </Card>
@@ -559,12 +429,12 @@ export default function ProductsIndex() {
               </div>
             </div>
             <CardTitle className="text-2xl font-black text-slate-900 tracking-tight mt-1">
-              5 Groups
+              {categories.length || 5} Groups
             </CardTitle>
           </CardHeader>
           <CardContent className="px-5 pb-4 pt-0">
             <span className="text-[11px] text-slate-500 font-medium">
-              Rice Meals, Snacks, Drinks, Bakery, and Fruits.
+              {categories.map(c => c.name).join(', ') || 'Rice Meals, Snacks, Drinks, Bakery, Healthy'}
             </span>
           </CardContent>
         </Card>
@@ -574,25 +444,25 @@ export default function ProductsIndex() {
       <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white overflow-hidden">
         {/* Table Filters Bar */}
         <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50">
-          <div className="flex items-center gap-2 flex-1 max-w-sm">
+          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 flex-1 max-w-sm">
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
               <Input
-                placeholder="Search food item name, SKU..."
-                value={globalFilter ?? ''}
-                onChange={(e) => setGlobalFilter(e.target.value)}
+                placeholder="Search food item name, barcode..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 h-9 text-xs bg-white rounded-xl border-slate-200"
               />
             </div>
-          </div>
+          </form>
 
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-            {['All', 'Rice Meals', 'Snacks & Sandwiches', 'Beverages', 'Bakery', 'Healthy', 'LowStock'].map(cat => (
+            {['All', ...categories.map(c => c.name), 'LowStock'].map(cat => (
               <button
                 key={cat}
-                onClick={() => setCategoryFilter(cat)}
+                onClick={() => handleCategorySelect(cat)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                  categoryFilter === cat
+                  activeCategory === cat
                     ? 'bg-[#5c1516] text-white shadow-xs'
                     : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                 }`}
@@ -648,26 +518,26 @@ export default function ProductsIndex() {
         {/* Pagination Bar */}
         <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 text-xs text-slate-500 font-medium">
           <div>
-            Showing {table.getRowModel().rows.length} of {filteredData.length} products
+            Showing {products.from || 0} - {products.to || 0} of {products.total} products
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
+              onClick={() => products.prev_page_url && router.visit(products.prev_page_url)}
+              disabled={!products.prev_page_url}
               className="h-8 px-3 text-xs rounded-lg border-slate-200 disabled:opacity-40"
             >
               Previous
             </Button>
             <span className="font-bold text-slate-700">
-              Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
+              Page {products.current_page} of {products.last_page || 1}
             </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
+              onClick={() => products.next_page_url && router.visit(products.next_page_url)}
+              disabled={!products.next_page_url}
               className="h-8 px-3 text-xs rounded-lg border-slate-200 disabled:opacity-40"
             >
               Next
@@ -695,10 +565,10 @@ export default function ProductsIndex() {
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
                   <div>
                     <span className="font-bold text-slate-800">{restockProduct.name}</span>
-                    <p className="text-[11px] text-slate-400">Current Stock: {restockProduct.stock} pcs</p>
+                    <p className="text-[11px] text-slate-400">Current Stock: {restockProduct.stock_quantity} pcs</p>
                   </div>
                   <Badge variant="outline" className="font-mono text-slate-600">
-                    {restockProduct.sku}
+                    {restockProduct.barcode || 'NO-BARCODE'}
                   </Badge>
                 </div>
 
@@ -729,7 +599,7 @@ export default function ProductsIndex() {
                 </div>
 
                 <div className="text-xs text-slate-500 font-medium">
-                  Updated stock after restock will be: <strong className="text-emerald-700 font-extrabold">{restockProduct.stock + addQty} pcs</strong>.
+                  Updated stock after restock will be: <strong className="text-emerald-700 font-extrabold">{Number(restockProduct.stock_quantity) + addQty} pcs</strong>.
                 </div>
               </div>
 
@@ -739,9 +609,10 @@ export default function ProductsIndex() {
                 </Button>
                 <Button
                   onClick={handleConfirmRestock}
+                  disabled={isRestocking}
                   className="bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs h-9 px-5 rounded-xl"
                 >
-                  Confirm Restock
+                  {isRestocking ? 'Restocking...' : 'Confirm Restock'}
                 </Button>
               </DialogFooter>
             </>
