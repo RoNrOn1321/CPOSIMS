@@ -11,8 +11,7 @@ import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { Badge } from '@/Components/ui/badge';
 import { formatMoney } from '@/lib/formatters';
-import { lookup } from '@/routes/pos/student';
-import { status as hardwareStatusRoute } from '@/routes/pos/hardware';
+import { lookupStudent, hardwareStatus } from '@/actions/App/Http/Controllers/PosController';
 import axios from 'axios';
 import ThermalReceipt, { printThermalReceipt } from '@/Components/POS/ThermalReceipt';
 import { Product } from './ProductGrid';
@@ -110,7 +109,7 @@ export default function PosHardwareDiagnosticsModal({
     // Host Hardware Polling
     const fetchStatus = async () => {
       try {
-        const res = await axios.get(hardwareStatusRoute().url, {
+        const res = await axios.get(hardwareStatus.url(), {
           headers: { Accept: 'application/json' },
         });
         if (res.status === 200 && res.data) {
@@ -191,7 +190,7 @@ export default function PosHardwareDiagnosticsModal({
       }
 
       // 2. Query student account via RFID UID or Student ID Number
-      const res = await axios.get(lookup().url, {
+      const res = await axios.get(lookupStudent.url(), {
         params: { identifier: query },
         headers: { Accept: 'application/json' },
       });

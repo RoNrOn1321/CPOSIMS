@@ -29,11 +29,12 @@ import {
   CheckCircle2, 
   ShieldAlert,
   CreditCard,
-  Banknote
+  Banknote,
+  Printer
 } from 'lucide-react';
-import { lookup } from '@/routes/pos/student';
-import { voidMethod } from '@/routes/pos/transactions';
+import { lookupStudent, voidTransaction } from '@/actions/App/Http/Controllers/PosController';
 import axios from 'axios';
+import ThermalReceipt from '@/Components/POS/ThermalReceipt';
 
 export interface RecentTransactionItem {
   name: string;
@@ -107,6 +108,7 @@ export default function POSIndex({
   // Recent transactions list state
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>(initialTransactions);
   const [transactionToVoid, setTransactionToVoid] = useState<RecentTransaction | null>(null);
+  const [transactionToPrint, setTransactionToPrint] = useState<RecentTransaction | null>(null);
   const [isVoiding, setIsVoiding] = useState<boolean>(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
@@ -192,7 +194,7 @@ export default function POSIndex({
     setSearchedStudent(null);
 
     try {
-      const endpoint = lookup.url({ query: { identifier: trimmed } });
+      const endpoint = lookupStudent.url({ query: { identifier: trimmed } });
       const res = await axios.get(endpoint, {
         headers: { Accept: 'application/json' },
       });
@@ -228,7 +230,7 @@ export default function POSIndex({
 
     setIsVoiding(true);
     try {
-      const endpoint = voidMethod.url(transactionToVoid.id);
+      const endpoint = voidTransaction.url(transactionToVoid.id);
       const res = await axios.post(endpoint, {}, {
         headers: { Accept: 'application/json' },
       });
@@ -523,10 +525,20 @@ export default function POSIndex({
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className={`text-base font-extrabold ${isVoided ? 'line-through text-slate-400' : 'text-[#5c1516]'}`}>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-base font-extrabold mr-1 ${isVoided ? 'line-through text-slate-400' : 'text-[#5c1516]'}`}>
                           {formatMoney(tx.total_amount)}
                         </span>
+
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setTransactionToPrint(tx)}
+                          className="h-8 text-xs font-bold border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer flex items-center gap-1"
+                        >
+                          <Printer size={12} />
+                          Print Receipt
+                        </Button>
 
                         {!isVoided && (
                           <Button
@@ -546,6 +558,39 @@ export default function POSIndex({
               })
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reprint Thermal Receipt Dialog */}
+      <Dialog open={!!transactionToPrint} onOpenChange={(open) => !open && setTransactionToPrint(null)}>
+        <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800 text-base">
+              <Printer size={18} className="text-[#5c1516]" />
+              Print 58mm Thermal Receipt
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Receipt #{transactionToPrint?.receipt_number} &bull; {transactionToPrint?.created_at}
+            </DialogDescription>
+          </DialogHeader>
+
+          {transactionToPrint && (
+            <div className="py-1">
+              <ThermalReceipt
+                type="sale"
+                receiptNumber={transactionToPrint.receipt_number}
+                createdAt={transactionToPrint.created_at}
+                cashierName={transactionToPrint.cashier_name}
+                customerName={transactionToPrint.student_name}
+                paymentMethod={transactionToPrint.payment_method}
+                items={transactionToPrint.items}
+                totalAmount={transactionToPrint.total_amount}
+                amountTendered={transactionToPrint.amount_tendered}
+                changeAmount={transactionToPrint.change_amount}
+                showPrintButton={true}
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -23,6 +23,14 @@ import {
 import { Label } from '@/Components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { router, useForm, usePage } from '@inertiajs/react';
+import { 
+  index as settingsIndex, 
+  storeUser, 
+  updateUser, 
+  storeCategory, 
+  updateCategory, 
+  destroyCategory 
+} from '@/actions/App/Http/Controllers/Admin/SettingController';
 import { PageProps } from '@/types';
 import { 
   Users, 
@@ -131,7 +139,7 @@ export default function SettingsIndex({
   // Filter handlers
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    router.get('/admin/settings', {
+    router.get(settingsIndex.url(), {
       user_search: searchTerm.trim() || undefined,
       role: selectedRole !== 'all' ? selectedRole : undefined,
     }, { preserveState: true });
@@ -139,7 +147,7 @@ export default function SettingsIndex({
 
   const handleRoleChange = (role: string) => {
     setSelectedRole(role);
-    router.get('/admin/settings', {
+    router.get(settingsIndex.url(), {
       user_search: searchTerm.trim() || undefined,
       role: role !== 'all' ? role : undefined,
     }, { preserveState: true });
@@ -148,7 +156,7 @@ export default function SettingsIndex({
   const handleClearFilters = () => {
     setSearchTerm('');
     setSelectedRole('all');
-    router.get('/admin/settings');
+    router.get(settingsIndex.url());
   };
 
   // User Modal open/edit
@@ -186,14 +194,14 @@ export default function SettingsIndex({
   const handleUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingUser) {
-      userForm.put(`/admin/settings/users/${editingUser.id}`, {
+      userForm.put(updateUser.url(editingUser.id), {
         onSuccess: () => {
           setIsUserModalOpen(false);
           userForm.reset();
         },
       });
     } else {
-      userForm.post('/admin/settings/users', {
+      userForm.post(storeUser.url(), {
         onSuccess: () => {
           setIsUserModalOpen(false);
           userForm.reset();
@@ -227,14 +235,14 @@ export default function SettingsIndex({
   const handleCategorySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingCategory) {
-      categoryForm.put(`/admin/settings/categories/${editingCategory.id}`, {
+      categoryForm.put(updateCategory.url(editingCategory.id), {
         onSuccess: () => {
           setIsCategoryModalOpen(false);
           categoryForm.reset();
         },
       });
     } else {
-      categoryForm.post('/admin/settings/categories', {
+      categoryForm.post(storeCategory.url(), {
         onSuccess: () => {
           setIsCategoryModalOpen(false);
           categoryForm.reset();
@@ -245,7 +253,7 @@ export default function SettingsIndex({
 
   const handleConfirmDeleteCategory = () => {
     if (!categoryToDelete) return;
-    router.delete(`/admin/settings/categories/${categoryToDelete.id}`, {
+    router.delete(destroyCategory.url(categoryToDelete.id), {
       onSuccess: () => setCategoryToDelete(null),
     });
   };

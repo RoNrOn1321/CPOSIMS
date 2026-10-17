@@ -7,7 +7,7 @@ import { Badge } from '@/Components/ui/badge';
 import { formatMoney } from '@/lib/formatters';
 import { Link, router, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Trash2, AlertCircle } from 'lucide-react';
-import { update as updateProductRoute, destroy as destroyProductRoute, index as indexProductRoute } from '@/routes/admin/products';
+import { update as updateProductAction, destroy as destroyProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 
 interface CategoryItem {
   id: number;
@@ -51,12 +51,12 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    put(updateProductRoute(product.id).url);
+    put(updateProductAction.url(product.id));
   };
 
   const handleDelete = () => {
     if (confirm(`Permanently remove "${product.name}" from the cafeteria database?`)) {
-      router.delete(destroyProductRoute(product.id).url);
+      router.delete(destroyProductAction.url(product.id));
     }
   };
 
@@ -64,7 +64,7 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
     <AdminLayout portal="admin" activeNav="products">
       <div className="flex items-center justify-between pb-2">
         <div className="flex items-center gap-3">
-          <Link href={indexProductRoute().url}>
+          <Link href={indexProductAction.url()}>
             <Button variant="outline" size="sm" className="h-9 w-9 p-0 rounded-xl border-slate-200">
               <ArrowLeft size={16} />
             </Button>

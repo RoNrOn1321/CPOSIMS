@@ -44,7 +44,7 @@ index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 
 /**
 * @see \App\Http\Controllers\PosController::lookupStudent
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 export const lookupStudent = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -59,7 +59,7 @@ lookupStudent.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::lookupStudent
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookupStudent.url = (options?: RouteQueryOptions) => {
@@ -68,7 +68,7 @@ lookupStudent.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\PosController::lookupStudent
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookupStudent.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -77,7 +77,7 @@ lookupStudent.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\PosController::lookupStudent
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookupStudent.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -87,7 +87,7 @@ lookupStudent.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => (
 
 /**
 * @see \App\Http\Controllers\PosController::hardwareStatus
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:151
  * @route '/pos/hardware-status'
  */
 export const hardwareStatus = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -102,7 +102,7 @@ hardwareStatus.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::hardwareStatus
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:151
  * @route '/pos/hardware-status'
  */
 hardwareStatus.url = (options?: RouteQueryOptions) => {
@@ -111,7 +111,7 @@ hardwareStatus.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\PosController::hardwareStatus
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:151
  * @route '/pos/hardware-status'
  */
 hardwareStatus.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -120,7 +120,7 @@ hardwareStatus.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\PosController::hardwareStatus
- * @see app/Http/Controllers/PosController.php:135
+ * @see app/Http/Controllers/PosController.php:151
  * @route '/pos/hardware-status'
  */
 hardwareStatus.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -129,8 +129,42 @@ hardwareStatus.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => 
 })
 
 /**
+* @see \App\Http\Controllers\PosController::printReceipt
+ * @see app/Http/Controllers/PosController.php:212
+ * @route '/pos/hardware-print'
+ */
+export const printReceipt = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: printReceipt.url(options),
+    method: 'post',
+})
+
+printReceipt.definition = {
+    methods: ["post"],
+    url: '/pos/hardware-print',
+} satisfies RouteDefinition<["post"]>
+
+/**
+* @see \App\Http\Controllers\PosController::printReceipt
+ * @see app/Http/Controllers/PosController.php:212
+ * @route '/pos/hardware-print'
+ */
+printReceipt.url = (options?: RouteQueryOptions) => {
+    return printReceipt.definition.url + queryParams(options)
+}
+
+/**
+* @see \App\Http\Controllers\PosController::printReceipt
+ * @see app/Http/Controllers/PosController.php:212
+ * @route '/pos/hardware-print'
+ */
+printReceipt.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
+    url: printReceipt.url(options),
+    method: 'post',
+})
+
+/**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:193
+ * @see app/Http/Controllers/PosController.php:492
  * @route '/pos/transactions/{transaction}/void'
  */
 export const voidTransaction = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
@@ -145,7 +179,7 @@ voidTransaction.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:193
+ * @see app/Http/Controllers/PosController.php:492
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.url = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions) => {
@@ -178,13 +212,13 @@ voidTransaction.url = (args: { transaction: number | { id: number } } | [transac
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:193
+ * @see app/Http/Controllers/PosController.php:492
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.post = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
     url: voidTransaction.url(args, options),
     method: 'post',
 })
-const PosController = { index, lookupStudent, hardwareStatus, voidTransaction }
+const PosController = { index, lookupStudent, hardwareStatus, printReceipt, voidTransaction }
 
 export default PosController

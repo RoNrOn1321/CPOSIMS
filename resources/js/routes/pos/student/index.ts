@@ -1,7 +1,7 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
 * @see \App\Http\Controllers\PosController::lookup
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 export const lookup = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -16,7 +16,7 @@ lookup.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::lookup
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookup.url = (options?: RouteQueryOptions) => {
@@ -25,7 +25,7 @@ lookup.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\PosController::lookup
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookup.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -34,7 +34,7 @@ lookup.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\PosController::lookup
- * @see app/Http/Controllers/PosController.php:85
+ * @see app/Http/Controllers/PosController.php:101
  * @route '/pos/student-lookup'
  */
 lookup.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({

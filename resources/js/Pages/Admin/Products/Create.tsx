@@ -6,7 +6,7 @@ import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
 import { Link, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
-import { store as storeProductRoute, index as indexProductRoute } from '@/routes/admin/products';
+import { store as storeProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 
 interface CategoryItem {
   id: number;
@@ -35,7 +35,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    post(storeProductRoute().url);
+    post(storeProductAction.url());
   };
 
   return (
@@ -43,7 +43,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
       {/* Top Header with Back Button */}
       <div className="flex items-center justify-between pb-2">
         <div className="flex items-center gap-3">
-          <Link href={indexProductRoute().url}>
+          <Link href={indexProductAction.url()}>
             <Button variant="outline" size="sm" className="h-9 w-9 p-0 rounded-xl border-slate-200">
               <ArrowLeft size={16} />
             </Button>

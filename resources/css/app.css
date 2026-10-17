@@ -140,34 +140,45 @@
 
 @media print {
   /* 58mm POS Thermal Printing (Xprinter XP-58IIH) */
+  html,
   body.printing-thermal-receipt {
+    width: 58mm !important;
+    min-height: 0 !important;
+    height: auto !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
+    overflow: visible !important;
   }
-  body.printing-thermal-receipt * {
-    visibility: hidden !important;
+
+  body.printing-thermal-receipt > *:not(#thermal-receipt-print-portal) {
+    display: none !important;
   }
-  body.printing-thermal-receipt #thermal-receipt-print-area,
-  body.printing-thermal-receipt #thermal-receipt-print-area * {
-    visibility: visible !important;
-  }
+
+  body.printing-thermal-receipt #thermal-receipt-print-portal,
   body.printing-thermal-receipt #thermal-receipt-print-area {
     display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     width: 58mm !important;
     max-width: 58mm !important;
     margin: 0 !important;
     padding: 2mm 3mm !important;
     box-shadow: none !important;
     border: none !important;
+    border-radius: 0 !important;
     background: #fff !important;
+    color: #000 !important;
+    visibility: visible !important;
+  }
+
+  body.printing-thermal-receipt #thermal-receipt-print-portal *,
+  body.printing-thermal-receipt #thermal-receipt-print-area * {
+    visibility: visible !important;
     color: #000 !important;
   }
 
   @page {
+    size: 58mm auto;
     margin: 0;
   }
 }

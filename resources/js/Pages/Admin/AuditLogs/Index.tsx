@@ -21,6 +21,7 @@ import {
   DialogFooter 
 } from '@/Components/ui/dialog';
 import { router } from '@inertiajs/react';
+import { index as auditLogsIndex } from '@/actions/App/Http/Controllers/Admin/AuditLogController';
 import { 
   ShieldCheck, 
   Search, 
@@ -90,7 +91,7 @@ export default function AuditLogsIndex({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    router.get('/admin/audit-logs', {
+    router.get(auditLogsIndex.url(), {
       search: searchTerm || undefined,
       action: selectedAction !== 'All' ? selectedAction : undefined,
     }, { preserveState: true });
@@ -98,7 +99,7 @@ export default function AuditLogsIndex({
 
   const handleActionFilter = (action: string) => {
     setSelectedAction(action);
-    router.get('/admin/audit-logs', {
+    router.get(auditLogsIndex.url(), {
       search: searchTerm || undefined,
       action: action !== 'All' ? action : undefined,
     }, { preserveState: true });

@@ -14,6 +14,7 @@ import {
 } from '@/Components/ui/table';
 import { formatMoney } from '@/lib/formatters';
 import { router } from '@inertiajs/react';
+import { index as reportsIndex, exportMethod } from '@/actions/App/Http/Controllers/Admin/ReportController';
 import { 
   BarChart3, 
   Calendar, 
@@ -150,7 +151,7 @@ export default function ReportsIndex({
 
   const handleApplyFilter = (e: React.FormEvent) => {
     e.preventDefault();
-    router.get('/admin/reports', {
+    router.get(reportsIndex.url(), {
       start_date: startDate || undefined,
       end_date: endDate || undefined,
     }, { preserveState: true });
@@ -167,7 +168,7 @@ export default function ReportsIndex({
     setStartDate(startStr);
     setEndDate(endStr);
 
-    router.get('/admin/reports', {
+    router.get(reportsIndex.url(), {
       start_date: startStr,
       end_date: endStr,
     }, { preserveState: true });
@@ -182,7 +183,7 @@ export default function ReportsIndex({
     setStartDate(startStr);
     setEndDate(endStr);
 
-    router.get('/admin/reports', {
+    router.get(reportsIndex.url(), {
       start_date: startStr,
       end_date: endStr,
     }, { preserveState: true });
@@ -238,7 +239,7 @@ export default function ReportsIndex({
           <div className="flex items-center gap-2 flex-wrap">
             {/* Quick Export Sales CSV */}
             <a
-              href={`/admin/reports/export?type=sales&start_date=${startDate}&end_date=${endDate}`}
+              href={exportMethod.url({ query: { type: 'sales', start_date: startDate, end_date: endDate } })}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
             >
               <Download size={14} className="text-[#5c1516]" />
@@ -247,7 +248,7 @@ export default function ReportsIndex({
 
             {/* Quick Export Topups CSV */}
             <a
-              href={`/admin/reports/export?type=topups&start_date=${startDate}&end_date=${endDate}`}
+              href={exportMethod.url({ query: { type: 'topups', start_date: startDate, end_date: endDate } })}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
             >
               <FileSpreadsheet size={14} className="text-[#d38c28]" />
@@ -524,7 +525,7 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href={`/admin/reports/export?type=sales&start_date=${startDate}&end_date=${endDate}`}
+                href={exportMethod.url({ query: { type: 'sales', start_date: startDate, end_date: endDate } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
                 <Download size={13} className="text-[#5c1516]" />
@@ -699,7 +700,7 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href={`/admin/reports/export?type=topups&start_date=${startDate}&end_date=${endDate}`}
+                href={exportMethod.url({ query: { type: 'topups', start_date: startDate, end_date: endDate } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
                 <Download size={13} className="text-[#d38c28]" />
@@ -786,7 +787,7 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href="/admin/reports/export?type=inventory"
+                href={exportMethod.url({ query: { type: 'inventory' } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
                 <Download size={13} className="text-slate-700" />

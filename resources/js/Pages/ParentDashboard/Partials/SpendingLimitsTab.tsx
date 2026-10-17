@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { router } from '@inertiajs/react';
+import { update as updateStudentLimit } from '@/actions/App/Http/Controllers/ParentStudentLimitController';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/Components/ui/card';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
@@ -28,7 +29,7 @@ export default function SpendingLimitsTab({
   const handleSave = () => {
     setIsSubmitting(true);
     router.patch(
-      `/parent/student-limits/${student.id}`,
+      updateStudentLimit.url(student.id),
       { daily_limit: dailyLimitInput },
       {
         preserveScroll: true,

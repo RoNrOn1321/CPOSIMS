@@ -15,7 +15,7 @@ import {
   Wifi
 } from 'lucide-react';
 import { Link } from '@inertiajs/react';
-import { logout } from '@/routes';
+import { destroy as logoutAction } from '@/actions/App/Http/Controllers/Auth/AuthenticatedSessionController';
 import { Input } from '@/Components/ui/input';
 import { Button } from '@/Components/ui/button';
 import { Badge } from '@/Components/ui/badge';
@@ -201,7 +201,7 @@ export default function POSLayout({
               </div>
               
               <Link
-                href={logout().url}
+                href={logoutAction.url()}
                 method="post"
                 as="button"
                 title="Log Out Terminal"

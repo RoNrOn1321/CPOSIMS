@@ -325,3 +325,38 @@ it('blocks unauthenticated or unauthorized users from hardware status endpoint',
     // Parents forbidden
     $this->actingAs($parent)->get(route('pos.hardware.status'))->assertForbidden();
 });
+
+it('processes a 58mm thermal receipt print payload for authenticated cashiers', function () {
+    $cashier = User::factory()->cashier()->create();
+
+    $response = $this->actingAs($cashier)->postJson(route('pos.hardware.print'), [
+        'type' => 'sale',
+        'receipt_number' => 'RCPT-20261017-TEST',
+        'cashier_name' => 'Canteen Staff',
+        'customer_name' => 'Juan Dela Cruz',
+        'payment_method' => 'cash',
+        'items' => [
+            [
+                'name' => 'Chicken Adobo Bowl',
+                'quantity' => 1,
+                'unit_price' => 75.00,
+                'subtotal' => 75.00,
+            ],
+        ],
+        'total_amount' => 75.00,
+        'amount_tendered' => 100.00,
+        'change_amount' => 25.00,
+        'kick_drawer' => true,
+    ]);
+
+    $response->assertOk()
+        ->assertJsonPath('receipt_number', 'RCPT-20261017-TEST')
+        ->assertJsonStructure([
+            'printed',
+            'method',
+            'printer',
+            'port',
+            'receipt_number',
+            'message',
+        ]);
+});

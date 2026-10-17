@@ -191,6 +191,7 @@ class PosCheckoutController extends Controller
                     'id' => $student->id,
                     'name' => "{$student->first_name} {$student->last_name}",
                     'student_id_number' => $student->student_id_number,
+                    'previous_balance' => round((float) $student->current_balance + $totalAmount, 2),
                     'remaining_balance' => (float) $student->current_balance,
                 ] : null,
                 'items' => $receiptItems,

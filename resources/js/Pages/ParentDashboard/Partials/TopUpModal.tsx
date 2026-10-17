@@ -13,7 +13,7 @@ import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
 import { CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 import { router } from '@inertiajs/react';
-import { topup } from '@/routes/parent/student-accounts';
+import { parentStore as topupStudent } from '@/actions/App/Http/Controllers/BalanceTopupController';
 import { Student } from '../types';
 
 interface TopUpModalProps {
@@ -92,7 +92,7 @@ export default function TopUpModal({
     setErrorMessage(null);
 
     router.post(
-      topup.url(student.id),
+      topupStudent.url(student.id),
       {
         amount: activeAmount,
         payment_method: paymentMethod,

@@ -22,7 +22,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import axios from 'axios';
-import { topup } from '@/routes/pos';
+import { posStore as posTopup } from '@/actions/App/Http/Controllers/BalanceTopupController';
 import ThermalReceipt from '@/Components/POS/ThermalReceipt';
 
 interface PosTopUpModalProps {
@@ -116,7 +116,7 @@ export default function PosTopUpModal({
     setErrorMessage(null);
 
     try {
-      const endpoint = topup.url();
+      const endpoint = posTopup.url();
       const response = await axios.post(
         endpoint,
         {

@@ -18,7 +18,14 @@ import {
   Users
 } from 'lucide-react';
 import { Link } from '@inertiajs/react';
-import { logout } from '@/routes';
+import { index as parentDashboardIndex } from '@/actions/App/Http/Controllers/ParentDashboardController';
+import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
+import { index as productsIndex } from '@/actions/App/Http/Controllers/Admin/ProductController';
+import { index as studentsIndex } from '@/actions/App/Http/Controllers/Admin/StudentAccountController';
+import { index as auditLogsIndex } from '@/actions/App/Http/Controllers/Admin/AuditLogController';
+import { index as reportsIndex } from '@/actions/App/Http/Controllers/Admin/ReportController';
+import { index as settingsIndex } from '@/actions/App/Http/Controllers/Admin/SettingController';
+import { destroy as logoutAction } from '@/actions/App/Http/Controllers/Auth/AuthenticatedSessionController';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 
@@ -49,7 +56,7 @@ export default function AdminLayout({
       <header className="h-16 bg-[#5c1516] text-white flex items-center justify-between px-6 shadow-md z-30 sticky top-0 border-b border-amber-900/30">
         {/* Left: Branding with School Logo */}
         <div className="flex items-center gap-4">
-          <Link href="/parent/dashboard" className="flex items-center gap-3 group">
+          <Link href={parentDashboardIndex.url()} className="flex items-center gap-3 group">
             <div className="w-10 h-10 p-1 bg-white rounded-xl shadow-md flex items-center justify-center overflow-hidden ring-2 ring-amber-400/40 group-hover:scale-105 transition-transform">
               <img 
                 src="/images/logo.png" 
@@ -80,7 +87,7 @@ export default function AdminLayout({
         <div className="flex items-center gap-3">
           {/* Quick POS Access for testing/staff */}
           <Link
-            href="/pos"
+            href={posIndex.url()}
             className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold border border-white/15 transition-all"
           >
             <span>POS Register</span>
@@ -127,7 +134,7 @@ export default function AdminLayout({
 
             {/* Logout Button */}
             <Link
-              href={logout().url}
+              href={logoutAction.url()}
               method="post"
               as="button"
               title="Sign Out"
@@ -188,37 +195,37 @@ export default function AdminLayout({
                     icon={<LayoutDashboard size={18} />} 
                     label="Dashboard" 
                     active={activeNav === 'dashboard'}
-                    href="/admin/products"
+                    href={productsIndex.url()}
                   />
                   <SidebarNavItem 
                     icon={<Users size={18} />} 
                     label="Students & RFID" 
                     active={activeNav === 'students'}
-                    href="/admin/students"
+                    href={studentsIndex.url()}
                   />
                   <SidebarNavItem 
                     icon={<Package size={18} />} 
                     label="Products & Inventory" 
                     active={activeNav === 'products'}
-                    href="/admin/products"
+                    href={productsIndex.url()}
                   />
                   <SidebarNavItem 
                     icon={<FileText size={18} />} 
                     label="Audit Logs" 
                     active={activeNav === 'audit'}
-                    href="/admin/audit-logs"
+                    href={auditLogsIndex.url()}
                   />
                   <SidebarNavItem 
                     icon={<BarChart3 size={18} />} 
                     label="Reports & Analytics" 
                     active={activeNav === 'reports'}
-                    href="/admin/reports"
+                    href={reportsIndex.url()}
                   />
                   <SidebarNavItem 
                     icon={<Settings size={18} />} 
                     label="System Settings" 
                     active={activeNav === 'settings'}
-                    href="/admin/settings"
+                    href={settingsIndex.url()}
                   />
                 </>
               )}

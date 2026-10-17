@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -27,10 +27,10 @@ import {
 } from 'lucide-react';
 import { StudentCustomer, CartItem } from './ActiveCart';
 import { formatCartForCheckout } from '@/Hooks/usePOSCart';
-import { checkout } from '@/routes/pos';
-import { lookup } from '@/routes/pos/student';
+import PosCheckoutController from '@/actions/App/Http/Controllers/PosCheckoutController';
+import { lookupStudent as lookupStudentAction } from '@/actions/App/Http/Controllers/PosController';
 import axios from 'axios';
-import ThermalReceipt from '@/Components/POS/ThermalReceipt';
+import ThermalReceipt, { printThermalReceipt } from '@/Components/POS/ThermalReceipt';
 
 export interface StudentLookupData {
   id: number;
@@ -83,9 +83,11 @@ export default function CheckoutModal({
   const denominations = [50, 100, 200, 500, 1000];
   const change = Math.max(0, cashTendered - totalAmount);
 
-  // Synchronize initial state when modal opens
+  const prevIsOpenRef = useRef(false);
+
+  // Synchronize initial state when modal opens or closes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
       setCashTendered(totalAmount);
       setErrorMessage(null);
       setSuccessReceipt(null);
@@ -93,7 +95,7 @@ export default function CheckoutModal({
       if (selectedCustomer?.rfidUid) {
         setRfidUid(selectedCustomer.rfidUid);
       }
-    } else {
+    } else if (!isOpen) {
       setRfidUid('');
       setErrorMessage(null);
       setSuccessReceipt(null);
@@ -101,7 +103,15 @@ export default function CheckoutModal({
       setLookupStudent(null);
       setLookupError(null);
     }
-  }, [isOpen, totalAmount, selectedCustomer]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen, selectedCustomer]);
+
+  // Keep cash tendered in sync with cart total before checkout
+  useEffect(() => {
+    if (isOpen && !successReceipt) {
+      setCashTendered(totalAmount);
+    }
+  }, [totalAmount, isOpen, successReceipt]);
 
   // Live student account lookup debounced query
   useEffect(() => {
@@ -122,7 +132,7 @@ export default function CheckoutModal({
 
     const timer = setTimeout(async () => {
       try {
-        const endpoint = lookup.url({ query: { identifier: trimmed } });
+        const endpoint = lookupStudentAction.url({ query: { identifier: trimmed } });
         const res = await axios.get(endpoint, {
           headers: { Accept: 'application/json' },
         });
@@ -249,7 +259,7 @@ export default function CheckoutModal({
     setIsSubmitting(true);
 
     try {
-      const endpoint = checkout.url();
+      const endpoint = PosCheckoutController.url();
       const response = await axios.post(endpoint, payload, {
         headers: {
           Accept: 'application/json',
@@ -259,6 +269,29 @@ export default function CheckoutModal({
       if (response.status === 201 || response.status === 200) {
         const receipt = response.data?.receipt;
         setSuccessReceipt(receipt);
+
+        const customerName = receipt?.student
+          ? receipt.student.name
+          : (selectedCustomer?.name || 'Walk-in Customer');
+
+        const printPayload = {
+          type: 'sale' as const,
+          receipt_number: receipt?.receipt_number || '',
+          created_at: receipt?.created_at,
+          cashier_name: receipt?.cashier,
+          customer_name: customerName,
+          student_id_number: receipt?.student?.student_id_number,
+          payment_method: receipt?.payment_method || (paymentMethod === 'rfid' ? 'cashless' : 'cash'),
+          items: receipt?.items || [],
+          total_amount: Number(receipt?.total_amount ?? totalAmount),
+          amount_tendered: receipt?.amount_tendered !== undefined ? Number(receipt.amount_tendered) : undefined,
+          change_amount: receipt?.change_amount !== undefined ? Number(receipt.change_amount) : 0,
+          previous_balance: receipt?.student?.previous_balance !== undefined ? Number(receipt.student.previous_balance) : undefined,
+          new_balance: receipt?.student?.remaining_balance !== undefined ? Number(receipt.student.remaining_balance) : undefined,
+          kick_drawer: true,
+        };
+
+        printThermalReceipt(printPayload);
         onSuccess(receipt);
       }
     } catch (err: any) {
@@ -345,10 +378,11 @@ export default function CheckoutModal({
                 studentIdNumber={successReceipt.student?.student_id_number}
                 paymentMethod={successReceipt.payment_method}
                 items={successReceipt.items || []}
-                totalAmount={successReceipt.total_amount}
-                amountTendered={successReceipt.amount_tendered}
-                changeAmount={successReceipt.change_amount}
-                newBalance={successReceipt.student ? successReceipt.student.remaining_balance : undefined}
+                totalAmount={Number(successReceipt.total_amount)}
+                amountTendered={successReceipt.amount_tendered !== undefined ? Number(successReceipt.amount_tendered) : undefined}
+                changeAmount={successReceipt.change_amount !== undefined ? Number(successReceipt.change_amount) : 0}
+                previousBalance={successReceipt.student?.previous_balance !== undefined ? Number(successReceipt.student.previous_balance) : undefined}
+                newBalance={successReceipt.student ? Number(successReceipt.student.remaining_balance) : undefined}
                 showPrintButton={true}
               />
 

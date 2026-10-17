@@ -3,7 +3,7 @@ import { router } from '@inertiajs/react';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Student } from '../types';
-import { status } from '@/routes/parent/student-accounts';
+import { update as updateStudentStatus } from '@/actions/App/Http/Controllers/ParentStudentStatusController';
 import { ShieldAlert, ShieldCheck, Lock, Unlock, Loader2 } from 'lucide-react';
 
 interface StudentHeaderProps {
@@ -40,7 +40,7 @@ export default function StudentHeader({
 
     setIsUpdatingStatus(true);
     router.patch(
-      status.url(selectedStudent.id),
+      updateStudentStatus.url(selectedStudent.id),
       { status: newStatus },
       {
         preserveScroll: true,

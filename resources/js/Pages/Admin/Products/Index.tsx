@@ -42,7 +42,14 @@ import {
   flexRender,
   SortingState,
 } from '@tanstack/react-table';
-import { create as createProductRoute, edit as editProductRoute, update as updateProductRoute, destroy as destroyProductRoute } from '@/routes/admin/products';
+import { 
+  index as productsIndex, 
+  create as createProductAction, 
+  edit as editProductAction, 
+  update as updateProductAction, 
+  destroy as destroyProductAction 
+} from '@/actions/App/Http/Controllers/Admin/ProductController';
+import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
 
 export interface ProductItem {
   id: number;
@@ -114,7 +121,7 @@ export default function ProductsIndex({
   // Trigger search filter
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    router.get('/admin/products', {
+    router.get(productsIndex.url(), {
       search: searchTerm || undefined,
       category: activeCategory !== 'All' ? activeCategory : undefined,
     }, { preserveState: true });
@@ -122,7 +129,7 @@ export default function ProductsIndex({
 
   const handleCategorySelect = (cat: string) => {
     setActiveCategory(cat);
-    router.get('/admin/products', {
+    router.get(productsIndex.url(), {
       search: searchTerm || undefined,
       category: cat !== 'All' ? cat : undefined,
     }, { preserveState: true });
@@ -133,7 +140,7 @@ export default function ProductsIndex({
     if (!restockProduct) return;
     setIsRestocking(true);
 
-    router.patch(updateProductRoute(restockProduct.id).url, {
+    router.patch(updateProductAction.url(restockProduct.id), {
       name: restockProduct.name,
       category_id: restockProduct.category_id,
       barcode: restockProduct.barcode,
@@ -157,7 +164,7 @@ export default function ProductsIndex({
   // Quick Delete Handler
   const handleDeleteProduct = (id: number) => {
     if (confirm('Are you sure you want to remove this item from the cafeteria inventory?')) {
-      router.delete(destroyProductRoute(id).url);
+      router.delete(destroyProductAction.url(id));
     }
   };
 
@@ -300,7 +307,7 @@ export default function ProductsIndex({
               <RefreshCw size={12} className="mr-1 text-amber-600" /> Restock
             </Button>
 
-            <Link href={editProductRoute(item.id).url}>
+            <Link href={editProductAction.url(item.id)}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -359,12 +366,12 @@ export default function ProductsIndex({
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link href="/pos">
+          <Link href={posIndex.url()}>
             <Button variant="outline" size="sm" className="h-10 text-xs font-bold border-slate-200">
               <ExternalLink size={14} className="mr-1.5 text-slate-500" /> Open POS Register
             </Button>
           </Link>
-          <Link href={createProductRoute().url}>
+          <Link href={createProductAction.url()}>
             <Button className="h-10 bg-[#5c1516] hover:bg-[#7a1420] text-white font-extrabold text-xs px-4 rounded-xl shadow-sm flex items-center gap-1.5">
               <Plus size={16} /> Add Product
             </Button>

@@ -23,6 +23,11 @@ import {
 import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
 import { router, useForm, usePage } from '@inertiajs/react';
+import { 
+  index as studentsIndex, 
+  store as storeStudent, 
+  update as updateStudent 
+} from '@/actions/App/Http/Controllers/Admin/StudentAccountController';
 import { PageProps } from '@/types';
 import { formatMoney } from '@/lib/formatters';
 import { 
@@ -126,7 +131,7 @@ export default function StudentsIndex({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    router.get('/admin/students', {
+    router.get(studentsIndex.url(), {
       search: searchTerm.trim() || undefined,
       status: selectedStatus !== 'all' ? selectedStatus : undefined,
     }, { preserveState: true });
@@ -134,7 +139,7 @@ export default function StudentsIndex({
 
   const handleStatusFilterChange = (status: string) => {
     setSelectedStatus(status);
-    router.get('/admin/students', {
+    router.get(studentsIndex.url(), {
       search: searchTerm.trim() || undefined,
       status: status !== 'all' ? status : undefined,
     }, { preserveState: true });
@@ -143,7 +148,7 @@ export default function StudentsIndex({
   const handleClearFilters = () => {
     setSearchTerm('');
     setSelectedStatus('all');
-    router.get('/admin/students');
+    router.get(studentsIndex.url());
   };
 
   // Open modal in Create mode
@@ -189,14 +194,14 @@ export default function StudentsIndex({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingStudent) {
-      put(`/admin/students/${editingStudent.id}`, {
+      put(updateStudent.url(editingStudent.id), {
         onSuccess: () => {
           setIsModalOpen(false);
           reset();
         },
       });
     } else {
-      post('/admin/students', {
+      post(storeStudent.url(), {
         onSuccess: () => {
           setIsModalOpen(false);
           reset();
