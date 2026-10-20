@@ -4,6 +4,7 @@ import products from './products'
 import auditLogs from './audit-logs'
 import reports from './reports'
 import students from './students'
+import parents from './parents'
 import settings from './settings'
 /**
 * @see \App\Http\Controllers\Admin\DashboardController::dashboard
@@ -53,6 +54,7 @@ products: Object.assign(products, products),
 auditLogs: Object.assign(auditLogs, auditLogs),
 reports: Object.assign(reports, reports),
 students: Object.assign(students, students),
+parents: Object.assign(parents, parents),
 settings: Object.assign(settings, settings),
 }
 

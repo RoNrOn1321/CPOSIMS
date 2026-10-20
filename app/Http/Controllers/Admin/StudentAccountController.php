@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\StudentAccount;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -42,6 +43,7 @@ class StudentAccountController extends Controller
         $parents = User::where('role', 'parent')
             ->where('status', 'active')
             ->orderBy('full_name')
+            ->limit(15)
             ->get(['id', 'full_name', 'username', 'email']);
 
         $metrics = [
@@ -125,5 +127,28 @@ class StudentAccountController extends Controller
 
         return redirect()->route('admin.students.index')
             ->with('success', "Student {$student->first_name} {$student->last_name} updated successfully.");
+    }
+
+    /**
+     * Async debounced search for active parents.
+     */
+    public function searchParents(Request $request): JsonResponse
+    {
+        $search = trim($request->input('q', ''));
+
+        $parents = User::where('role', 'parent')
+            ->where('status', 'active')
+            ->when(! empty($search), function ($query) use ($search) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('full_name', 'like', "%{$search}%")
+                        ->orWhere('username', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            ->orderBy('full_name')
+            ->limit(15)
+            ->get(['id', 'full_name', 'username', 'email']);
+
+        return response()->json($parents);
     }
 }

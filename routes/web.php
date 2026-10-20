@@ -69,6 +69,7 @@ Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admi
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
     Route::get('/reports/export', [ReportController::class, 'export'])->name('reports.export');
     Route::get('/students', [StudentAccountController::class, 'index'])->name('students.index');
+    Route::get('/parents/search', [StudentAccountController::class, 'searchParents'])->name('parents.search');
     Route::post('/students', [StudentAccountController::class, 'store'])->name('students.store');
     Route::put('/students/{student}', [StudentAccountController::class, 'update'])->name('students.update');
     Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');

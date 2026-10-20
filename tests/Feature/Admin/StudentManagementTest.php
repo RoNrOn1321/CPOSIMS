@@ -168,4 +168,53 @@ it('forbids non-admins from accessing student management routes', function () {
     $this->actingAs($parent)->get(route('admin.students.index'))->assertForbidden();
     $this->actingAs($parent)->post(route('admin.students.store'), [])->assertForbidden();
     $this->actingAs($parent)->put(route('admin.students.update', $student), [])->assertForbidden();
+    $this->actingAs($parent)->get(route('admin.parents.search'))->assertForbidden();
+});
+
+it('allows admins to search active parents asynchronously for linking', function () {
+    $admin = User::factory()->admin()->create();
+
+    $matchingParent = User::factory()->parent()->create([
+        'full_name' => 'Roberto Del Rosario',
+        'email' => 'roberto.delrosario@example.com',
+        'username' => 'rdelrosario',
+        'status' => 'active',
+    ]);
+
+    $otherParent = User::factory()->parent()->create([
+        'full_name' => 'Beatriz Alonzo',
+        'email' => 'beatriz@example.com',
+        'username' => 'balonzo',
+        'status' => 'active',
+    ]);
+
+    $inactiveParent = User::factory()->parent()->create([
+        'full_name' => 'Roberto Inactive',
+        'status' => 'inactive',
+    ]);
+
+    // Search by name
+    $response = $this->actingAs($admin)->getJson(route('admin.parents.search', ['q' => 'Roberto']));
+
+    $response->assertOk()
+        ->assertJsonCount(1)
+        ->assertJsonFragment([
+            'id' => $matchingParent->id,
+            'full_name' => 'Roberto Del Rosario',
+            'username' => 'rdelrosario',
+            'email' => 'roberto.delrosario@example.com',
+        ])
+        ->assertJsonMissing([
+            'id' => $otherParent->id,
+        ])
+        ->assertJsonMissing([
+            'id' => $inactiveParent->id,
+        ]);
+
+    // Search without query returns all active parents
+    $allResponse = $this->actingAs($admin)->getJson(route('admin.parents.search'));
+    $allResponse->assertOk()
+        ->assertJsonFragment(['id' => $matchingParent->id])
+        ->assertJsonFragment(['id' => $otherParent->id])
+        ->assertJsonMissing(['id' => $inactiveParent->id]);
 });

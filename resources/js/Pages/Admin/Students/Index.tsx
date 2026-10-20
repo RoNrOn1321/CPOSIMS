@@ -22,6 +22,7 @@ import {
 } from '@/Components/ui/dialog';
 import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
+import ParentCombobox from '@/Components/ParentCombobox';
 import { router, useForm, usePage } from '@inertiajs/react';
 import { 
   index as studentsIndex, 
@@ -710,25 +711,21 @@ export default function StudentsIndex({
 
               {/* Row 4: Linked Parent Account */}
               <div>
-                <Label htmlFor="parent_id" className="text-xs font-bold text-slate-700">
-                  Linked Parent Account (Optional)
-                </Label>
-                <select
-                  id="parent_id"
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label htmlFor="parent_id" className="text-xs font-bold text-slate-700">
+                    Linked Parent Account (Optional)
+                  </Label>
+                  <span className="text-[10px] text-slate-400">
+                    Search by name, email, or username
+                  </span>
+                </div>
+                <ParentCombobox
                   value={data.parent_id}
-                  onChange={(e) => setData('parent_id', e.target.value)}
-                  className="mt-1 w-full h-10 text-xs font-medium rounded-xl border border-slate-200 bg-white px-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#5c1516]/20"
-                >
-                  <option value="">-- No Parent Linked (Independent Student) --</option>
-                  {parents.map((parent) => (
-                    <option key={parent.id} value={parent.id}>
-                      {parent.full_name} ({parent.email} / @{parent.username})
-                    </option>
-                  ))}
-                </select>
-                {errors.parent_id && (
-                  <p className="text-red-500 text-[11px] mt-1">{errors.parent_id}</p>
-                )}
+                  onChange={(parentId) => setData('parent_id', parentId)}
+                  initialParents={parents}
+                  selectedParent={editingStudent?.parent ?? null}
+                  error={errors.parent_id}
+                />
               </div>
 
               {/* Row 5: RFID Card UID with USB Reader integration */}

@@ -1,7 +1,7 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition } from './../../../wayfinder'
 /**
 * @see \App\Http\Controllers\Admin\ReportController::index
- * @see app/Http/Controllers/Admin/ReportController.php:22
+ * @see app/Http/Controllers/Admin/ReportController.php:30
  * @route '/admin/reports'
  */
 export const index = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -16,7 +16,7 @@ index.definition = {
 
 /**
 * @see \App\Http\Controllers\Admin\ReportController::index
- * @see app/Http/Controllers/Admin/ReportController.php:22
+ * @see app/Http/Controllers/Admin/ReportController.php:30
  * @route '/admin/reports'
  */
 index.url = (options?: RouteQueryOptions) => {
@@ -25,7 +25,7 @@ index.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\Admin\ReportController::index
- * @see app/Http/Controllers/Admin/ReportController.php:22
+ * @see app/Http/Controllers/Admin/ReportController.php:30
  * @route '/admin/reports'
  */
 index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -34,7 +34,7 @@ index.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\Admin\ReportController::index
- * @see app/Http/Controllers/Admin/ReportController.php:22
+ * @see app/Http/Controllers/Admin/ReportController.php:30
  * @route '/admin/reports'
  */
 index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
@@ -44,7 +44,7 @@ index.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
 
 /**
 * @see \App\Http\Controllers\Admin\ReportController::exportMethod
- * @see app/Http/Controllers/Admin/ReportController.php:110
+ * @see app/Http/Controllers/Admin/ReportController.php:118
  * @route '/admin/reports/export'
  */
 export const exportMethod = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -59,7 +59,7 @@ exportMethod.definition = {
 
 /**
 * @see \App\Http\Controllers\Admin\ReportController::exportMethod
- * @see app/Http/Controllers/Admin/ReportController.php:110
+ * @see app/Http/Controllers/Admin/ReportController.php:118
  * @route '/admin/reports/export'
  */
 exportMethod.url = (options?: RouteQueryOptions) => {
@@ -68,7 +68,7 @@ exportMethod.url = (options?: RouteQueryOptions) => {
 
 /**
 * @see \App\Http\Controllers\Admin\ReportController::exportMethod
- * @see app/Http/Controllers/Admin/ReportController.php:110
+ * @see app/Http/Controllers/Admin/ReportController.php:118
  * @route '/admin/reports/export'
  */
 exportMethod.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
@@ -77,7 +77,7 @@ exportMethod.get = (options?: RouteQueryOptions): RouteDefinition<'get'> => ({
 })
 /**
 * @see \App\Http\Controllers\Admin\ReportController::exportMethod
- * @see app/Http/Controllers/Admin/ReportController.php:110
+ * @see app/Http/Controllers/Admin/ReportController.php:118
  * @route '/admin/reports/export'
  */
 exportMethod.head = (options?: RouteQueryOptions): RouteDefinition<'head'> => ({
