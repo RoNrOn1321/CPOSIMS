@@ -9,6 +9,7 @@ import { Link, router, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Trash2, AlertCircle } from 'lucide-react';
 import { update as updateProductAction, destroy as destroyProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import ProductImageInput from './Partials/ProductImageInput';
+import ManageCategoriesModal from './Partials/ManageCategoriesModal';
 import { useConfirm } from '@/Hooks/use-confirm';
 
 interface CategoryItem {
@@ -37,6 +38,7 @@ interface ProductEditProps {
 }
 
 export default function ProductEdit({ product, categories = [] }: ProductEditProps) {
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = React.useState(false);
   const { confirm } = useConfirm();
   const { data, setData, post, processing, errors } = useForm({
     _method: 'PUT',
@@ -161,9 +163,18 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                    Category <span className="text-red-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
+                      Category <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryModalOpen(true)}
+                      className="text-[11px] font-bold text-[#5c1516] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      Manage Categories
+                    </button>
+                  </div>
                   <select
                     value={data.category_id}
                     onChange={(e) => setData('category_id', e.target.value)}
@@ -392,6 +403,13 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
           </Card>
         </div>
       </form>
+
+      {/* Category Management Modal */}
+      <ManageCategoriesModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        categories={categories}
+      />
     </AdminLayout>
   );
 }

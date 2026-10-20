@@ -140,7 +140,7 @@ class SettingController extends Controller
 
         $category = Category::create($validated);
 
-        return redirect()->route('admin.settings.index')
+        return redirect()->back(fallback: route('admin.settings.index'))
             ->with('success', "Category '{$category->name}' created successfully.");
     }
 
@@ -156,7 +156,7 @@ class SettingController extends Controller
 
         $category->update($validated);
 
-        return redirect()->route('admin.settings.index')
+        return redirect()->back(fallback: route('admin.settings.index'))
             ->with('success', "Category '{$category->name}' updated successfully.");
     }
 
@@ -168,7 +168,7 @@ class SettingController extends Controller
         $name = $category->name;
         $category->delete();
 
-        return redirect()->route('admin.settings.index')
+        return redirect()->back(fallback: route('admin.settings.index'))
             ->with('success', "Category '{$name}' removed successfully.");
     }
 }

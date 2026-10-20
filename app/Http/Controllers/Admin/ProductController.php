@@ -49,7 +49,7 @@ class ProductController extends Controller
 
         $totalValuation = (float) Product::selectRaw('SUM(price * stock_quantity) as total')->value('total') ?? 0;
         $lowStockCount = Product::whereColumn('stock_quantity', '<=', 'reorder_level')->count();
-        $categories = Category::orderBy('name')->get(['id', 'name']);
+        $categories = Category::withCount('products')->orderBy('name')->get(['id', 'name', 'description']);
 
         return Inertia::render('Admin/Products/Index', [
             'products' => $products,

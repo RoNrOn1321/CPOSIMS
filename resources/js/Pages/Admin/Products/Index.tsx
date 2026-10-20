@@ -32,8 +32,10 @@ import {
   AlertTriangle, 
   TrendingUp, 
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Tags
 } from 'lucide-react';
+import ManageCategoriesModal, { CategoryItem } from './Partials/ManageCategoriesModal';
 import {
   useReactTable,
   getCoreRowModel,
@@ -86,7 +88,7 @@ export interface PaginatedData<T> {
 
 interface ProductsIndexProps {
   products: PaginatedData<ProductItem>;
-  categories?: Array<{ id: number; name: string }>;
+  categories?: CategoryItem[];
   metrics?: {
     totalValuation: number;
     lowStockCount: number;
@@ -122,6 +124,7 @@ export default function ProductsIndex({
   const [restockProduct, setRestockProduct] = useState<ProductItem | null>(null);
   const [addQty, setAddQty] = useState<number>(20);
   const [isRestocking, setIsRestocking] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
   // Trigger search filter
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -398,6 +401,15 @@ export default function ProductsIndex({
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button 
+            type="button"
+            variant="outline" 
+            size="sm" 
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="h-10 text-xs font-bold border-slate-200 text-slate-700 hover:text-[#5c1516] hover:bg-red-50/50 rounded-xl cursor-pointer"
+          >
+            <Tags size={14} className="mr-1.5 text-[#5c1516]" /> Categories
+          </Button>
           <Link href={posIndex.url()}>
             <Button variant="outline" size="sm" className="h-10 text-xs font-bold border-slate-200">
               <ExternalLink size={14} className="mr-1.5 text-slate-500" /> Open POS Register
@@ -464,8 +476,19 @@ export default function ProductsIndex({
               <CardDescription className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                 Active Categories
               </CardDescription>
-              <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#008dd5] flex items-center justify-center">
-                <Package size={16} />
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsCategoryModalOpen(true)}
+                  className="h-6 text-[10px] font-bold text-[#5c1516] hover:bg-red-50 hover:text-[#7a1420] px-2 rounded-lg cursor-pointer"
+                >
+                  Manage
+                </Button>
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#008dd5] flex items-center justify-center">
+                  <Package size={16} />
+                </div>
               </div>
             </div>
             <CardTitle className="text-2xl font-black text-slate-900 tracking-tight mt-1">
@@ -510,6 +533,15 @@ export default function ProductsIndex({
                 {cat === 'LowStock' ? '⚠️ Low Stock' : cat}
               </button>
             ))}
+
+            <button
+              type="button"
+              onClick={() => setIsCategoryModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border border-dashed border-slate-300 text-slate-500 hover:text-[#5c1516] hover:border-[#5c1516] hover:bg-red-50/30 transition-all flex items-center gap-1 cursor-pointer"
+              title="Add or Manage Categories"
+            >
+              <Plus size={12} /> Category
+            </button>
           </div>
         </div>
 
@@ -659,6 +691,13 @@ export default function ProductsIndex({
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Category Management Modal */}
+      <ManageCategoriesModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        categories={categories}
+      />
     </AdminLayout>
   );
 }

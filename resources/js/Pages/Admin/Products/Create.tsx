@@ -8,6 +8,7 @@ import { Link, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
 import { store as storeProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import ProductImageInput from './Partials/ProductImageInput';
+import ManageCategoriesModal from './Partials/ManageCategoriesModal';
 
 interface CategoryItem {
   id: number;
@@ -19,6 +20,7 @@ interface ProductCreateProps {
 }
 
 export default function ProductCreate({ categories = [] }: ProductCreateProps) {
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = React.useState(false);
   const { data, setData, post, processing, errors } = useForm({
     name: '',
     category_id: categories[0]?.id ? String(categories[0].id) : '',
@@ -110,9 +112,18 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                    Product Category <span className="text-red-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
+                      Product Category <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryModalOpen(true)}
+                      className="text-[11px] font-bold text-[#5c1516] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      Manage Categories
+                    </button>
+                  </div>
                   <select
                     value={data.category_id}
                     onChange={(e) => setData('category_id', e.target.value)}
@@ -328,6 +339,13 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
           </Card>
         </div>
       </form>
+
+      {/* Category Management Modal */}
+      <ManageCategoriesModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        categories={categories}
+      />
     </AdminLayout>
   );
 }
