@@ -96,7 +96,7 @@ export function ConfirmDialog({
     }}>
       <DialogContent 
         className="sm:max-w-[420px] rounded-2xl p-6 bg-white border border-slate-200/80 shadow-2xl overflow-hidden"
-        showCloseButton={!isLoading}
+        showCloseButton={false}
       >
         <DialogHeader className="gap-3">
           <div className="flex items-start gap-3.5">

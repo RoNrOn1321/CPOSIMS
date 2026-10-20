@@ -595,7 +595,7 @@ export default function StudentsIndex({
 
       {/* Modal Dialog: Enroll or Edit Student & Replace RFID */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[560px] rounded-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[560px] rounded-2xl max-h-[90vh] overflow-y-auto" showCloseButton={false}>
           <form onSubmit={handleSubmit}>
             <DialogHeader>
               <div className="flex items-center gap-2">

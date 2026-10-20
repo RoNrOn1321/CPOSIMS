@@ -25,7 +25,7 @@ export default function EReceiptModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[400px] p-6 rounded-2xl">
+      <DialogContent className="sm:max-w-[400px] p-6 rounded-2xl" showCloseButton={false}>
         <div className="space-y-4 font-mono text-xs">
           <div ref={slipRef} id="thermal-receipt-print-area" className="space-y-4">
             <div className="text-center space-y-1 pb-3 border-b border-dashed border-slate-300">

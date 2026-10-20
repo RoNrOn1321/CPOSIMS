@@ -588,7 +588,7 @@ export default function ProductsIndex({
 
       {/* Quick Restock Modal Dialog */}
       <Dialog open={!!restockProduct} onOpenChange={() => setRestockProduct(null)}>
-        <DialogContent className="sm:max-w-[420px] rounded-2xl">
+        <DialogContent className="sm:max-w-[420px] rounded-2xl" showCloseButton={false}>
           {restockProduct && (
             <>
               <DialogHeader>

@@ -689,7 +689,7 @@ export default function SettingsIndex({
 
       {/* User Modal Dialog */}
       <Dialog open={isUserModalOpen} onOpenChange={setIsUserModalOpen}>
-        <DialogContent className="sm:max-w-[500px] rounded-2xl">
+        <DialogContent className="sm:max-w-[500px] rounded-2xl" showCloseButton={false}>
           <form onSubmit={handleUserSubmit}>
             <DialogHeader>
               <div className="flex items-center gap-2">
@@ -861,7 +861,7 @@ export default function SettingsIndex({
 
       {/* Category Modal Dialog */}
       <Dialog open={isCategoryModalOpen} onOpenChange={setIsCategoryModalOpen}>
-        <DialogContent className="sm:max-w-[450px] rounded-2xl">
+        <DialogContent className="sm:max-w-[450px] rounded-2xl" showCloseButton={false}>
           <form onSubmit={handleCategorySubmit}>
             <DialogHeader>
               <div className="flex items-center gap-2">

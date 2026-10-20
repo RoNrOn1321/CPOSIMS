@@ -135,7 +135,10 @@ export default function PosStockModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[760px] max-h-[88vh] flex flex-col p-6 rounded-2xl gap-4">
+      <DialogContent 
+        className="sm:max-w-[760px] max-h-[88vh] flex flex-col p-6 rounded-2xl gap-4"
+        showCloseButton={false}
+      >
         {/* Header */}
         <DialogHeader className="pb-3 border-b border-slate-100 pr-10">
           <div className="flex items-center gap-2.5">

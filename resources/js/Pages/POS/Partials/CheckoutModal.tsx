@@ -314,7 +314,7 @@ export default function CheckoutModal({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent 
         className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white"
-        closeButtonClassName="text-white/80 hover:text-white hover:bg-white/10"
+        showCloseButton={false}
       >
         {/* Header */}
         <div className="bg-[#5c1516] text-white p-6 relative">

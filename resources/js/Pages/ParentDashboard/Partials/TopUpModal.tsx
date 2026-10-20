@@ -122,7 +122,7 @@ export default function TopUpModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[460px] p-0 overflow-hidden rounded-2xl border-0 shadow-2xl bg-white">
+      <DialogContent className="sm:max-w-[460px] p-0 overflow-hidden rounded-2xl border-0 shadow-2xl bg-white" showCloseButton={false}>
         <div className="bg-[#5c1516] text-white p-6">
           <DialogHeader className="text-left space-y-1">
             <Badge className="bg-amber-400 text-amber-950 font-bold text-[10px] w-fit">

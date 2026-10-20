@@ -386,7 +386,7 @@ export default function AuditLogsIndex({
 
       {/* Forensic Inspection Dialog */}
       <Dialog open={!!inspectedLog} onOpenChange={() => setInspectedLog(null)}>
-        <DialogContent className="sm:max-w-[480px] rounded-2xl">
+        <DialogContent className="sm:max-w-[480px] rounded-2xl" showCloseButton={false}>
           {inspectedLog && (
             <>
               <DialogHeader>

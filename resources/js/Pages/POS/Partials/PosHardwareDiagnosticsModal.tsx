@@ -256,7 +256,7 @@ export default function PosHardwareDiagnosticsModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[620px] rounded-2xl max-h-[90vh] overflow-y-auto p-0 gap-0">
+      <DialogContent className="sm:max-w-[620px] rounded-2xl max-h-[90vh] overflow-y-auto p-0 gap-0" showCloseButton={false}>
         <DialogHeader className="p-6 pb-4 border-b border-slate-100 pr-12">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#5c1516]/10 text-[#5c1516] flex items-center justify-center font-bold">
