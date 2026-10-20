@@ -17,7 +17,9 @@ import {
   ExternalLink,
   Users
 } from 'lucide-react';
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
+import { PageProps } from '@/types';
+import NotificationsDropdown from '@/Components/NotificationsDropdown';
 import { index as parentDashboardIndex } from '@/actions/App/Http/Controllers/ParentDashboardController';
 import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
 import { dashboard as adminDashboardRoute } from '@/routes/admin';
@@ -47,9 +49,21 @@ export default function AdminLayout({
   activeNav = 'dashboard',
   onNavigate,
   onTopUpClick,
-  unreadNotificationsCount = 2,
+  unreadNotificationsCount,
 }: AdminLayoutProps) {
   const isParent = portal === 'parent';
+  const { auth } = usePage<PageProps>().props;
+  const user = auth?.user;
+
+  const userInitials = user?.full_name
+    ? user.full_name
+        .split(' ')
+        .filter(Boolean)
+        .map(n => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : (isParent ? 'PD' : 'AD');
 
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-800 flex flex-col font-sans antialiased selection:bg-[#5c1516] selection:text-white">
@@ -107,29 +121,22 @@ export default function AdminLayout({
             </Button>
           )}
 
-          {/* Notifications Indicator */}
-          <button 
-            type="button"
-            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center relative transition-colors"
-            title="Notifications"
-          >
-            <Bell size={17} />
-            {unreadNotificationsCount > 0 && (
-              <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-400 rounded-full ring-2 ring-[#5c1516]" />
-            )}
-          </button>
+          {/* Real-time System Notifications Dropdown */}
+          <NotificationsDropdown onTopUpClick={onTopUpClick} />
 
           {/* User Profile Capsule */}
           <div className="flex items-center gap-2.5 pl-3 border-l border-white/20">
             <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-300/40 text-amber-300 font-bold text-xs flex items-center justify-center shadow-inner">
-              {isParent ? 'PD' : 'AD'}
+              {userInitials}
             </div>
             <div className="hidden lg:flex flex-col text-left">
               <span className="text-xs font-bold text-white leading-tight">
-                {isParent ? 'Mrs. Elena Dela Cruz' : 'Administrator'}
+                {user?.full_name || (isParent ? 'Parent Account' : 'Administrator')}
               </span>
               <span className="text-[10px] text-amber-300/80">
-                {isParent ? 'Parent ID: #P-2024-88' : 'Super Admin'}
+                {isParent 
+                  ? (user?.username ? `@${user.username}` : 'Parent Portal')
+                  : (user?.role === 'admin' ? 'Super Admin' : 'Staff Admin')}
               </span>
             </div>
 

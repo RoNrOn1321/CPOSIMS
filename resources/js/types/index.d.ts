@@ -12,12 +12,25 @@ export interface User {
     email_verified_at?: string;
 }
 
+export interface SystemNotification {
+    id: string;
+    type: 'stock' | 'void' | 'topup' | 'balance' | 'info';
+    title: string;
+    message: string;
+    time: string;
+    timestamp: number;
+    severity: 'danger' | 'warning' | 'info' | 'success';
+    actionUrl?: string;
+    actionLabel?: string;
+}
+
 export type PageProps<
     T extends Record<string, unknown> = Record<string, unknown>,
 > = T & {
     auth: {
         user: User;
     };
+    system_notifications?: SystemNotification[];
     flash?: {
         success?: string | null;
         error?: string | null;
