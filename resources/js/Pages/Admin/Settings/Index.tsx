@@ -32,6 +32,7 @@ import {
   destroyCategory 
 } from '@/actions/App/Http/Controllers/Admin/SettingController';
 import { PageProps } from '@/types';
+import ConfirmDialog from '@/Components/ui/confirm-dialog';
 import { 
   Users, 
   UserCheck, 
@@ -935,42 +936,26 @@ export default function SettingsIndex({
       </Dialog>
 
       {/* Delete Category Confirmation Dialog */}
-      <Dialog open={!!categoryToDelete} onOpenChange={() => setCategoryToDelete(null)}>
-        <DialogContent className="sm:max-w-[420px] rounded-2xl">
-          <DialogHeader>
-            <div className="flex items-center gap-2 text-rose-700">
-              <AlertTriangle size={20} />
-              <DialogTitle className="text-base font-extrabold">Confirm Removal</DialogTitle>
-            </div>
-            <DialogDescription className="text-xs text-slate-600 pt-2">
-              Are you sure you want to remove category <strong className="text-slate-900">{categoryToDelete?.name}</strong>?
-              {categoryToDelete && categoryToDelete.products_count > 0 && (
-                <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] font-semibold">
-                  Warning: There are {categoryToDelete.products_count} items currently assigned to this category.
-                </div>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogFooter className="pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCategoryToDelete(null)}
-              className="h-9 text-xs rounded-xl border-slate-200"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleConfirmDeleteCategory}
-              className="h-9 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl"
-            >
-              Confirm & Remove
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={!!categoryToDelete}
+        onOpenChange={(open) => !open && setCategoryToDelete(null)}
+        title="Confirm Category Removal"
+        description={
+          <span>
+            Are you sure you want to remove category <strong className="font-extrabold text-slate-800">{categoryToDelete?.name}</strong>?
+          </span>
+        }
+        warningNote={
+          categoryToDelete && categoryToDelete.products_count > 0
+            ? `Warning: There are ${categoryToDelete.products_count} items currently assigned to this category.`
+            : undefined
+        }
+        confirmText="Remove Category"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={handleConfirmDeleteCategory}
+        onCancel={() => setCategoryToDelete(null)}
+      />
     </AdminLayout>
   );
 }

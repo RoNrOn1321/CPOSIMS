@@ -9,6 +9,7 @@ import { Link, router, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Trash2, AlertCircle } from 'lucide-react';
 import { update as updateProductAction, destroy as destroyProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import ProductImageInput from './Partials/ProductImageInput';
+import { useConfirm } from '@/Hooks/use-confirm';
 
 interface CategoryItem {
   id: number;
@@ -36,6 +37,7 @@ interface ProductEditProps {
 }
 
 export default function ProductEdit({ product, categories = [] }: ProductEditProps) {
+  const { confirm } = useConfirm();
   const { data, setData, post, processing, errors } = useForm({
     _method: 'PUT',
     name: product.name ?? '',
@@ -62,8 +64,23 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
     post(updateProductAction.url(product.id));
   };
 
-  const handleDelete = () => {
-    if (confirm(`Permanently remove "${product.name}" from the cafeteria database?`)) {
+  const handleDelete = async () => {
+    const isConfirmed = await confirm({
+      title: 'Delete Product',
+      description: (
+        <span>
+          Are you sure you want to permanently remove <strong className="font-extrabold text-slate-800">{product.name}</strong> from the cafeteria database?
+        </span>
+      ),
+      warningNote: product.stock_quantity > 0
+        ? `This item currently has ${product.stock_quantity} portions recorded in inventory. Removing it will record an automatic inventory adjustment.`
+        : undefined,
+      confirmText: 'Delete Item',
+      cancelText: 'Cancel',
+      variant: 'danger',
+    });
+
+    if (isConfirmed) {
       router.delete(destroyProductAction.url(product.id));
     }
   };

@@ -35,6 +35,7 @@ import {
 import { lookupStudent, voidTransaction } from '@/actions/App/Http/Controllers/PosController';
 import axios from 'axios';
 import ThermalReceipt from '@/Components/POS/ThermalReceipt';
+import ConfirmDialog from '@/Components/ui/confirm-dialog';
 
 export interface RecentTransactionItem {
   name: string;
@@ -595,52 +596,34 @@ export default function POSIndex({
       </Dialog>
 
       {/* Void Confirmation Dialog */}
-      <Dialog open={!!transactionToVoid} onOpenChange={(open) => !open && setTransactionToVoid(null)}>
-        <DialogContent className="sm:max-w-[420px] rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-700 text-base">
-              <AlertTriangle size={20} />
-              Confirm Transaction Void
-            </DialogTitle>
-            <DialogDescription className="text-xs text-slate-600 pt-2 leading-relaxed">
-              Are you sure you want to void receipt <strong className="text-slate-900">{transactionToVoid?.receipt_number}</strong> for <strong className="text-[#5c1516]">{transactionToVoid ? formatMoney(transactionToVoid.total_amount) : ''}</strong>?
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="p-3 bg-red-50/70 border border-red-200/80 rounded-xl space-y-1.5 text-xs text-red-900 my-2">
-            <span className="font-bold block">Voiding Actions:</span>
-            <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-red-800">
-              <li>Product quantities will be restored back to inventory stock.</li>
-              <li>An inventory log entry with action <code className="bg-red-100 px-1 rounded font-bold">void</code> will be created.</li>
+      <ConfirmDialog
+        open={!!transactionToVoid}
+        onOpenChange={(open) => !open && setTransactionToVoid(null)}
+        title="Confirm Transaction Void"
+        description={
+          <span>
+            Are you sure you want to void receipt <strong className="font-mono font-bold text-slate-800">{transactionToVoid?.receipt_number}</strong> for <strong className="text-[#5c1516] font-extrabold">{transactionToVoid ? formatMoney(transactionToVoid.total_amount) : ''}</strong>?
+          </span>
+        }
+        warningNote={
+          <div className="space-y-1">
+            <span className="font-bold block text-amber-950">Voiding Operations:</span>
+            <ul className="list-disc pl-3.5 space-y-0.5 text-[11px] text-amber-900">
+              <li>Product quantities will be restored back into active inventory stock.</li>
+              <li>An inventory log record with action 'void' will be generated.</li>
               {transactionToVoid?.payment_method === 'cashless' && (
-                <li>Student balance will be automatically refunded <strong>{formatMoney(transactionToVoid.total_amount)}</strong>.</li>
+                <li>Student RFID card balance will be automatically refunded <strong>{formatMoney(transactionToVoid.total_amount)}</strong>.</li>
               )}
             </ul>
           </div>
-
-          <DialogFooter className="flex items-center justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={isVoiding}
-              onClick={() => setTransactionToVoid(null)}
-              className="text-xs"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={isVoiding}
-              onClick={handleExecuteVoid}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs h-9 px-4 rounded-xl flex items-center gap-1.5"
-            >
-              {isVoiding ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-              Confirm & Void
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        }
+        confirmText="Confirm & Void"
+        cancelText="Keep Transaction"
+        variant="danger"
+        isLoading={isVoiding}
+        onConfirm={handleExecuteVoid}
+        onCancel={() => setTransactionToVoid(null)}
+      />
 
       {/* Held Orders Recall Dialog */}
       <Dialog open={isHeldOrdersModalOpen} onOpenChange={setIsHeldOrdersModalOpen}>

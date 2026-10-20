@@ -50,6 +50,7 @@ import {
   destroy as destroyProductAction 
 } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
+import { useConfirm } from '@/Hooks/use-confirm';
 
 export interface ProductItem {
   id: number;
@@ -114,6 +115,7 @@ export default function ProductsIndex({
   const [searchTerm, setSearchTerm] = useState(filters.search ?? '');
   const [activeCategory, setActiveCategory] = useState(filters.category ?? 'All');
   const [sorting, setSorting] = useState<SortingState>([]);
+  const { confirm } = useConfirm();
 
   // Restock Quick Modal state
   const [restockProduct, setRestockProduct] = useState<ProductItem | null>(null);
@@ -164,9 +166,24 @@ export default function ProductsIndex({
   };
 
   // Quick Delete Handler
-  const handleDeleteProduct = (id: number) => {
-    if (confirm('Are you sure you want to remove this item from the cafeteria inventory?')) {
-      router.delete(destroyProductAction.url(id));
+  const handleDeleteProduct = async (item: ProductItem) => {
+    const isConfirmed = await confirm({
+      title: 'Remove Product from Inventory',
+      description: (
+        <span>
+          Are you sure you want to remove <strong className="font-extrabold text-slate-800">{item.name}</strong> from the cafeteria inventory?
+        </span>
+      ),
+      warningNote: item.stock_quantity > 0 
+        ? `This item currently has ${item.stock_quantity} units remaining in stock. Removing it will record an automatic inventory stock adjustment.`
+        : undefined,
+      confirmText: 'Remove Item',
+      cancelText: 'Keep Item',
+      variant: 'danger',
+    });
+
+    if (isConfirmed) {
+      router.delete(destroyProductAction.url(item.id));
     }
   };
 
@@ -332,7 +349,7 @@ export default function ProductsIndex({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => handleDeleteProduct(item.id)}
+              onClick={() => handleDeleteProduct(item)}
               className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50"
             >
               <Trash2 size={14} />

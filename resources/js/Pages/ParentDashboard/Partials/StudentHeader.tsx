@@ -5,6 +5,7 @@ import { Button } from '@/Components/ui/button';
 import { Student } from '../types';
 import { update as updateStudentStatus } from '@/actions/App/Http/Controllers/ParentStudentStatusController';
 import { ShieldAlert, ShieldCheck, Lock, Unlock, Loader2 } from 'lucide-react';
+import { useConfirm } from '@/Hooks/use-confirm';
 
 interface StudentHeaderProps {
   students: Student[];
@@ -18,6 +19,7 @@ export default function StudentHeader({
   onSelectStudent,
 }: StudentHeaderProps) {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+  const { confirm } = useConfirm();
 
   const getShortGrade = (level: string) => {
     const match = level.match(/Grade\s*(\d+)/i);
@@ -28,13 +30,20 @@ export default function StudentHeader({
 
   const isLostCard = selectedStudent.status === 'lost_card';
 
-  const handleToggleStatus = () => {
+  const handleToggleStatus = async () => {
     const newStatus = isLostCard ? 'active' : 'lost_card';
-    const confirmMessage = isLostCard
-      ? `Reactivate RFID card for ${selectedStudent.name}? This will restore cafeteria buying privileges.`
-      : `Report lost and immediately freeze RFID card for ${selectedStudent.name}? All POS cafeteria purchases and reloads will be immediately blocked.`;
 
-    if (!window.confirm(confirmMessage)) {
+    const confirmed = await confirm({
+      title: isLostCard ? 'Reactivate RFID Card?' : 'Freeze & Report Card Lost?',
+      description: isLostCard
+        ? `Reactivate RFID card for ${selectedStudent.name}? This will restore immediate cafeteria purchasing privileges.`
+        : `Report lost and immediately freeze RFID card for ${selectedStudent.name}? All POS cafeteria purchases will be blocked immediately to prevent unauthorized spending.`,
+      confirmText: isLostCard ? 'Yes, Reactivate Card' : 'Freeze Card Immediately',
+      cancelText: 'Keep Current Status',
+      variant: isLostCard ? 'success' : 'danger',
+    });
+
+    if (!confirmed) {
       return;
     }
 
