@@ -20,6 +20,7 @@ import {
 import { Link, usePage } from '@inertiajs/react';
 import { PageProps } from '@/types';
 import NotificationsDropdown from '@/Components/NotificationsDropdown';
+import AdminComputerIcon from '@/Components/AdminComputerIcon';
 import { index as parentDashboardIndex } from '@/actions/App/Http/Controllers/ParentDashboardController';
 import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
 import { dashboard as adminDashboardRoute } from '@/routes/admin';
@@ -161,8 +162,12 @@ export default function AdminLayout({
           <div className="space-y-6">
             {/* Context Badge */}
             <div className="p-3 bg-gradient-to-br from-red-50 to-amber-50/50 border border-red-100/80 rounded-2xl flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#5c1516] text-white flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0">
-                <Sparkles size={18} className="text-amber-300" />
+              <div className="w-10 h-10 rounded-xl bg-[#5c1516] border border-amber-400/30 flex items-center justify-center font-extrabold text-sm shadow-sm shrink-0">
+                {isParent ? (
+                  <Users size={18} className="text-amber-300" />
+                ) : (
+                  <AdminComputerIcon className="w-6 h-6" />
+                )}
               </div>
               <div className="overflow-hidden">
                 <h4 className="font-extrabold text-xs text-slate-800 leading-tight truncate">
