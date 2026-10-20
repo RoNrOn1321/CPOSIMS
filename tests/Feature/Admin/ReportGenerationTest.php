@@ -177,31 +177,49 @@ it('allows admins to export sales, topups, and inventory reports as CSV', functi
         'reorder_level' => 5,
     ]);
 
-    // 1. Sales CSV Export
-    $salesResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'sales']));
-    $salesResponse->assertOk();
-    $salesResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
-    $salesContent = $salesResponse->streamedContent();
+    // 1. Sales Excel (.xlsx) Export by default
+    $salesExcelResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'sales']));
+    $salesExcelResponse->assertOk();
+    $salesExcelResponse->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect($salesExcelResponse->headers->get('Content-Disposition'))->toContain('.xlsx');
+
+    // 2. Sales CSV Export
+    $salesCsvResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'sales', 'format' => 'csv']));
+    $salesCsvResponse->assertOk();
+    $salesCsvResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
+    $salesContent = $salesCsvResponse->streamedContent();
     expect($salesContent)->toContain('Receipt Number')
         ->toContain('RCPT-EXPORT-999')
         ->toContain('Juan Dela Cruz')
         ->toContain('250.00');
 
-    // 2. Top-ups CSV Export
-    $topupResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'topups']));
-    $topupResponse->assertOk();
-    $topupResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
-    $topupContent = $topupResponse->streamedContent();
+    // 3. Top-ups Excel (.xlsx) Export
+    $topupExcelResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'topups']));
+    $topupExcelResponse->assertOk();
+    $topupExcelResponse->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect($topupExcelResponse->headers->get('Content-Disposition'))->toContain('.xlsx');
+
+    // 4. Top-ups CSV Export
+    $topupCsvResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'topups', 'format' => 'csv']));
+    $topupCsvResponse->assertOk();
+    $topupCsvResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
+    $topupContent = $topupCsvResponse->streamedContent();
     expect($topupContent)->toContain('Reference Number')
         ->toContain('TOPUP-REF-888')
         ->toContain('Juan Dela Cruz')
         ->toContain('300.00');
 
-    // 3. Inventory CSV Export
-    $inventoryResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'inventory']));
-    $inventoryResponse->assertOk();
-    $inventoryResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
-    $inventoryContent = $inventoryResponse->streamedContent();
+    // 5. Inventory Excel (.xlsx) Export
+    $inventoryExcelResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'inventory']));
+    $inventoryExcelResponse->assertOk();
+    $inventoryExcelResponse->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect($inventoryExcelResponse->headers->get('Content-Disposition'))->toContain('.xlsx');
+
+    // 6. Inventory CSV Export
+    $inventoryCsvResponse = $this->actingAs($admin)->get(route('admin.reports.export', ['type' => 'inventory', 'format' => 'csv']));
+    $inventoryCsvResponse->assertOk();
+    $inventoryCsvResponse->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
+    $inventoryContent = $inventoryCsvResponse->streamedContent();
     expect($inventoryContent)->toContain('Product Name')
         ->toContain('Export Special Sandwich')
         ->toContain('STCT-SANDWICH-01')

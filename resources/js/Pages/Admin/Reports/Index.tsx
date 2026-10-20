@@ -237,22 +237,22 @@ export default function ReportsIndex({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Quick Export Sales CSV */}
+            {/* Quick Export Sales Excel */}
             <a
-              href={exportMethod.url({ query: { type: 'sales', start_date: startDate, end_date: endDate } })}
+              href={exportMethod.url({ query: { type: 'sales', format: 'xlsx', start_date: startDate, end_date: endDate } })}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
             >
-              <Download size={14} className="text-[#5c1516]" />
-              <span>Export Sales CSV</span>
+              <FileSpreadsheet size={14} className="text-[#5c1516]" />
+              <span>Export Sales (.xlsx)</span>
             </a>
 
-            {/* Quick Export Topups CSV */}
+            {/* Quick Export Topups Excel */}
             <a
-              href={exportMethod.url({ query: { type: 'topups', start_date: startDate, end_date: endDate } })}
+              href={exportMethod.url({ query: { type: 'topups', format: 'xlsx', start_date: startDate, end_date: endDate } })}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-xs transition-colors"
             >
               <FileSpreadsheet size={14} className="text-[#d38c28]" />
-              <span>Export Top-Ups CSV</span>
+              <span>Export Top-Ups (.xlsx)</span>
             </a>
 
             {/* Print Formal Report Button */}
@@ -525,11 +525,11 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href={exportMethod.url({ query: { type: 'sales', start_date: startDate, end_date: endDate } })}
+                href={exportMethod.url({ query: { type: 'sales', format: 'xlsx', start_date: startDate, end_date: endDate } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
-                <Download size={13} className="text-[#5c1516]" />
-                <span>Download Sales CSV</span>
+                <FileSpreadsheet size={13} className="text-[#5c1516]" />
+                <span>Export Sales (.xlsx)</span>
               </a>
             </CardHeader>
             <CardContent className="p-0">
@@ -700,11 +700,11 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href={exportMethod.url({ query: { type: 'topups', start_date: startDate, end_date: endDate } })}
+                href={exportMethod.url({ query: { type: 'topups', format: 'xlsx', start_date: startDate, end_date: endDate } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
-                <Download size={13} className="text-[#d38c28]" />
-                <span>Download Top-Ups CSV</span>
+                <FileSpreadsheet size={13} className="text-[#d38c28]" />
+                <span>Export Top-Ups (.xlsx)</span>
               </a>
             </CardHeader>
             <CardContent className="p-0">
@@ -787,11 +787,11 @@ export default function ReportsIndex({
                 </CardDescription>
               </div>
               <a
-                href={exportMethod.url({ query: { type: 'inventory' } })}
+                href={exportMethod.url({ query: { type: 'inventory', format: 'xlsx' } })}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
               >
-                <Download size={13} className="text-slate-700" />
-                <span>Download Master Inventory CSV</span>
+                <FileSpreadsheet size={13} className="text-slate-700" />
+                <span>Export Master Inventory (.xlsx)</span>
               </a>
             </CardHeader>
             <CardContent className="p-0">
