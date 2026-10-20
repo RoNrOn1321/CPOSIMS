@@ -50,7 +50,7 @@ class PosController extends Controller
                     'price' => (float) $product->price,
                     'stock' => (int) $product->stock_quantity,
                     'barcode' => $product->barcode,
-                    'image' => $image,
+                    'image' => $product->image_url ?: $image,
                 ];
             })
             ->values()

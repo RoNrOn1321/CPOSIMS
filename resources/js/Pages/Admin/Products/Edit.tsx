@@ -8,6 +8,7 @@ import { formatMoney } from '@/lib/formatters';
 import { Link, router, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Trash2, AlertCircle } from 'lucide-react';
 import { update as updateProductAction, destroy as destroyProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
+import ProductImageInput from './Partials/ProductImageInput';
 
 interface CategoryItem {
   id: number;
@@ -24,6 +25,8 @@ interface ProductItem {
   stock_quantity: number;
   reorder_level: number;
   status: 'active' | 'inactive';
+  image_path?: string | null;
+  image_url?: string | null;
   category?: CategoryItem | null;
 }
 
@@ -33,7 +36,8 @@ interface ProductEditProps {
 }
 
 export default function ProductEdit({ product, categories = [] }: ProductEditProps) {
-  const { data, setData, put, processing, errors } = useForm({
+  const { data, setData, post, processing, errors } = useForm({
+    _method: 'PUT',
     name: product.name ?? '',
     category_id: product.category_id ? String(product.category_id) : '',
     barcode: product.barcode ?? '',
@@ -43,6 +47,10 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
     reorder_level: Number(product.reorder_level ?? 10),
     status: (product.status ?? 'active') as 'active' | 'inactive',
     remarks: '',
+    image_file: null as File | null,
+    image_url: '',
+    image_source: 'none' as 'upload' | 'url' | 'none',
+    remove_image: false,
   });
 
   const numPrice = Number(data.price) || 0;
@@ -51,7 +59,7 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    put(updateProductAction.url(product.id));
+    post(updateProductAction.url(product.id));
   };
 
   const handleDelete = () => {
@@ -267,6 +275,28 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
         </div>
 
         <div className="space-y-6">
+          <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-extrabold text-slate-800">
+                Product Image
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-400">
+                Update or import product image via file upload or web link.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProductImageInput
+                initialImageUrl={product.image_url}
+                onImageFileChange={(file) => setData('image_file', file)}
+                onImageUrlChange={(url) => setData('image_url', url)}
+                onImageSourceChange={(source) => setData('image_source', source)}
+                onRemoveImageChange={(remove) => setData('remove_image', remove)}
+                fileError={errors.image_file}
+                urlError={errors.image_url}
+              />
+            </CardContent>
+          </Card>
+
           <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-extrabold text-slate-800">

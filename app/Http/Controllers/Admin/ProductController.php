@@ -11,6 +11,9 @@ use App\Models\Product;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -77,6 +80,11 @@ class ProductController extends Controller
     {
         DB::transaction(function () use ($request) {
             $validated = $request->validated();
+            $imagePath = $this->handleProductImage($request);
+
+            $validated['image_path'] = $imagePath;
+            unset($validated['image_file'], $validated['image_url'], $validated['image_source']);
+
             $product = Product::create($validated);
 
             if ($product->stock_quantity > 0) {
@@ -132,6 +140,10 @@ class ProductController extends Controller
                 ]);
             }
 
+            $imagePath = $this->handleProductImage($request, $product);
+            $validated['image_path'] = $imagePath;
+            unset($validated['image_file'], $validated['image_url'], $validated['image_source'], $validated['remove_image']);
+
             $product->update($validated);
         });
 
@@ -157,10 +169,115 @@ class ProductController extends Controller
                 ]);
             }
 
+            if ($product->image_path) {
+                $this->deleteStoredImage($product->image_path);
+            }
+
             $product->delete();
         });
 
         return redirect()->route('admin.products.index')
             ->with('success', 'Product removed from inventory.');
+    }
+
+    /**
+     * Process product image from uploaded file or internet URL.
+     */
+    protected function handleProductImage(Request $request, ?Product $existingProduct = null): ?string
+    {
+        // 1. Explicit removal requested
+        if ($request->boolean('remove_image')) {
+            if ($existingProduct?->image_path) {
+                $this->deleteStoredImage($existingProduct->image_path);
+            }
+
+            return null;
+        }
+
+        // 2. Direct local file upload
+        if ($request->hasFile('image_file')) {
+            if ($existingProduct?->image_path) {
+                $this->deleteStoredImage($existingProduct->image_path);
+            }
+
+            return $request->file('image_file')->store('products', 'public');
+        }
+
+        // 3. Web link importation from the internet
+        if ($request->filled('image_url')) {
+            $imageUrl = trim((string) $request->input('image_url'));
+
+            if ($existingProduct && $existingProduct->image_path === $imageUrl) {
+                return $existingProduct->image_path;
+            }
+
+            if ($existingProduct?->image_path) {
+                $this->deleteStoredImage($existingProduct->image_path);
+            }
+
+            $localPath = $this->downloadRemoteImage($imageUrl);
+
+            return $localPath ?? $imageUrl;
+        }
+
+        // 4. Retain existing product image
+        return $existingProduct?->image_path;
+    }
+
+    /**
+     * Attempt downloading an image from a remote URL and caching it on public disk.
+     */
+    protected function downloadRemoteImage(string $url): ?string
+    {
+        try {
+            $response = Http::timeout(5)
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) CPOSIMS/1.0',
+                ])
+                ->get($url);
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $contentType = (string) $response->header('Content-Type');
+            $extension = match (true) {
+                str_contains($contentType, 'image/jpeg') => 'jpg',
+                str_contains($contentType, 'image/png') => 'png',
+                str_contains($contentType, 'image/webp') => 'webp',
+                str_contains($contentType, 'image/gif') => 'gif',
+                str_contains($contentType, 'image/svg') => 'svg',
+                default => null,
+            };
+
+            if (! $extension) {
+                $path = parse_url($url, PHP_URL_PATH);
+                $ext = pathinfo((string) $path, PATHINFO_EXTENSION);
+                if (in_array(strtolower($ext), ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'])) {
+                    $extension = strtolower($ext);
+                }
+            }
+
+            if (! $extension) {
+                return null;
+            }
+
+            $filename = 'products/'.Str::uuid().'.'.$extension;
+            Storage::disk('public')->put($filename, $response->body());
+
+            return $filename;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Safely delete a local product image file from the public disk.
+     */
+    protected function deleteStoredImage(string $path): void
+    {
+        if (! str_starts_with($path, 'http://') && ! str_starts_with($path, 'https://')) {
+            Storage::disk('public')->delete($path);
+        }
     }
 }

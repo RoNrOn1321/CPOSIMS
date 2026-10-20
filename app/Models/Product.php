@@ -27,7 +27,31 @@ class Product extends Model implements Auditable
         'stock_quantity',
         'reorder_level',
         'status',
+        'image_path',
     ];
+
+    /**
+     * @var list<string>
+     */
+    protected $appends = [
+        'image_url',
+    ];
+
+    /**
+     * Get the resolved image URL (local storage or remote web URL).
+     */
+    public function getImageUrlAttribute(): ?string
+    {
+        if (empty($this->image_path)) {
+            return null;
+        }
+
+        if (str_starts_with($this->image_path, 'http://') || str_starts_with($this->image_path, 'https://')) {
+            return $this->image_path;
+        }
+
+        return asset('storage/'.ltrim($this->image_path, '/'));
+    }
 
     /**
      * @return array<string, string>

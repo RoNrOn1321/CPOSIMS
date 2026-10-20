@@ -7,6 +7,7 @@ import { formatMoney } from '@/lib/formatters';
 import { Link, useForm } from '@inertiajs/react';
 import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
 import { store as storeProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
+import ProductImageInput from './Partials/ProductImageInput';
 
 interface CategoryItem {
   id: number;
@@ -27,6 +28,9 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
     stock_quantity: 30,
     reorder_level: 15,
     status: 'active' as 'active' | 'inactive',
+    image_file: null as File | null,
+    image_url: '',
+    image_source: 'upload' as 'upload' | 'url' | 'none',
   });
 
   const numPrice = Number(data.price) || 0;
@@ -240,8 +244,29 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
           </Card>
         </div>
 
-        {/* Right Column (Inventory Setup) */}
+        {/* Right Column (Image & Inventory Setup) */}
         <div className="space-y-6">
+          <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-extrabold text-slate-800">
+                Product Image
+              </CardTitle>
+              <CardDescription className="text-xs text-slate-400">
+                Upload from device or import image link from the internet.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProductImageInput
+                initialSource="upload"
+                onImageFileChange={(file) => setData('image_file', file)}
+                onImageUrlChange={(url) => setData('image_url', url)}
+                onImageSourceChange={(source) => setData('image_source', source)}
+                fileError={errors.image_file}
+                urlError={errors.image_url}
+              />
+            </CardContent>
+          </Card>
+
           <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-extrabold text-slate-800">

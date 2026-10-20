@@ -31,6 +31,9 @@ class StoreProductRequest extends FormRequest
             'stock_quantity' => ['required', 'integer', 'min:0'],
             'reorder_level' => ['required', 'integer', 'min:0'],
             'status' => ['sometimes', 'string', 'in:active,inactive'],
+            'image_file' => ['nullable', 'file', 'image', 'mimes:jpeg,jpg,png,webp,gif,svg', 'max:5120'],
+            'image_url' => ['nullable', 'string', 'url', 'max:1024'],
+            'image_source' => ['nullable', 'string', 'in:upload,url,none'],
         ];
     }
 
@@ -49,6 +52,10 @@ class StoreProductRequest extends FormRequest
             'cost.min' => 'Capital cost cannot be negative.',
             'stock_quantity.min' => 'Stock quantity cannot be negative.',
             'reorder_level.min' => 'Reorder level cannot be negative.',
+            'image_file.image' => 'The uploaded file must be a valid image.',
+            'image_file.mimes' => 'The image must be a file of type: jpeg, jpg, png, webp, gif, svg.',
+            'image_file.max' => 'The image size may not exceed 5MB.',
+            'image_url.url' => 'Please enter a valid image web URL (e.g. https://example.com/item.jpg).',
         ];
     }
 }

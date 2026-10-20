@@ -5,6 +5,8 @@ use App\Models\InventoryLog;
 use App\Models\Product;
 use App\Models\User;
 use Database\Seeders\RolesAndPermissionsSeeder;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function () {
@@ -168,4 +170,125 @@ it('validates product attributes strictly on store and update', function () {
         'stock_quantity',
         'reorder_level',
     ]);
+});
+
+it('allows admins to create a product with an uploaded image file', function () {
+    Storage::fake('public');
+
+    $admin = User::factory()->admin()->create();
+    $category = Category::firstOrCreate(['name' => 'Rice Meals']);
+    $file = UploadedFile::fake()->image('adobo.jpg', 600, 600);
+
+    $response = $this->actingAs($admin)->post(route('admin.products.store'), [
+        'name' => 'Pork Adobo Rice',
+        'category_id' => $category->id,
+        'barcode' => 'STCT-ADOBO-1',
+        'price' => 75.00,
+        'cost' => 45.00,
+        'stock_quantity' => 20,
+        'reorder_level' => 5,
+        'status' => 'active',
+        'image_file' => $file,
+    ]);
+
+    $response->assertRedirect(route('admin.products.index'));
+
+    $product = Product::where('barcode', 'STCT-ADOBO-1')->firstOrFail();
+    expect($product->image_path)->not->toBeNull()
+        ->and(str_starts_with($product->image_path, 'products/'))->toBeTrue()
+        ->and($product->image_url)->toBe(asset('storage/'.$product->image_path));
+
+    Storage::disk('public')->assertExists($product->image_path);
+});
+
+it('allows admins to create a product with an internet image link', function () {
+    $admin = User::factory()->admin()->create();
+    $category = Category::firstOrCreate(['name' => 'Beverages']);
+    $externalUrl = 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400';
+
+    $response = $this->actingAs($admin)->post(route('admin.products.store'), [
+        'name' => 'Iced Lemon Tea',
+        'category_id' => $category->id,
+        'barcode' => 'STCT-TEA-1',
+        'price' => 25.00,
+        'cost' => 12.00,
+        'stock_quantity' => 50,
+        'reorder_level' => 10,
+        'status' => 'active',
+        'image_url' => $externalUrl,
+    ]);
+
+    $response->assertRedirect(route('admin.products.index'));
+
+    $product = Product::where('barcode', 'STCT-TEA-1')->firstOrFail();
+    expect($product->image_path)->not->toBeNull()
+        ->and($product->image_url)->not->toBeNull();
+});
+
+it('allows admins to update a product image using an uploaded file or internet link and remove it', function () {
+    Storage::fake('public');
+
+    $admin = User::factory()->admin()->create();
+    $category = Category::firstOrCreate(['name' => 'Snacks & Sandwiches']);
+    $product = Product::factory()->create([
+        'category_id' => $category->id,
+        'image_path' => null,
+    ]);
+
+    // 1. Upload new image via update
+    $file = UploadedFile::fake()->image('sandwich.png', 400, 400);
+    $response = $this->actingAs($admin)->put(route('admin.products.update', $product), [
+        'name' => $product->name,
+        'category_id' => $category->id,
+        'barcode' => $product->barcode,
+        'price' => 35.00,
+        'cost' => 20.00,
+        'stock_quantity' => 25,
+        'reorder_level' => 5,
+        'status' => 'active',
+        'image_file' => $file,
+    ]);
+
+    $response->assertRedirect(route('admin.products.index'));
+    $product->refresh();
+    expect($product->image_path)->not->toBeNull();
+    Storage::disk('public')->assertExists($product->image_path);
+
+    // 2. Remove image
+    $response = $this->actingAs($admin)->put(route('admin.products.update', $product), [
+        'name' => $product->name,
+        'category_id' => $category->id,
+        'barcode' => $product->barcode,
+        'price' => 35.00,
+        'cost' => 20.00,
+        'stock_quantity' => 25,
+        'reorder_level' => 5,
+        'status' => 'active',
+        'remove_image' => true,
+    ]);
+
+    $response->assertRedirect(route('admin.products.index'));
+    $product->refresh();
+    expect($product->image_path)->toBeNull();
+});
+
+it('validates uploaded image file type and web link url strictly', function () {
+    $admin = User::factory()->admin()->create();
+    $category = Category::factory()->create();
+
+    $invalidFile = UploadedFile::fake()->create('document.pdf', 100);
+
+    $response = $this->actingAs($admin)->post(route('admin.products.store'), [
+        'name' => 'Invalid Image Product',
+        'category_id' => $category->id,
+        'barcode' => 'STCT-INVALID-1',
+        'price' => 30.00,
+        'cost' => 15.00,
+        'stock_quantity' => 10,
+        'reorder_level' => 5,
+        'image_file' => $invalidFile,
+        'image_url' => 'not-a-valid-url',
+    ]);
+
+    $response->assertSessionHasErrors(['image_file', 'image_url']);
 });

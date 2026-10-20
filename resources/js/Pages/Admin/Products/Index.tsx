@@ -61,6 +61,8 @@ export interface ProductItem {
   stock_quantity: number;
   reorder_level: number;
   status: 'active' | 'inactive';
+  image_path?: string | null;
+  image_url?: string | null;
   category?: {
     id: number;
     name: string;
@@ -184,12 +186,22 @@ export default function ProductsIndex({
       cell: ({ row }) => {
         const item = row.original;
         const catName = item.category?.name || 'Snacks & Sandwiches';
-        const imgUrl = categoryPlaceholders[catName] || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
+        const fallbackImg = categoryPlaceholders[catName] || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
+        const displayImg = item.image_url || fallbackImg;
 
         return (
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
-              <img src={imgUrl} alt={item.name} className="w-full h-full object-cover" />
+              <img 
+                src={displayImg} 
+                alt={item.name} 
+                className="w-full h-full object-cover" 
+                onError={(e) => {
+                  if (e.currentTarget.src !== fallbackImg) {
+                    e.currentTarget.src = fallbackImg;
+                  }
+                }}
+              />
             </div>
             <div>
               <div className="font-extrabold text-xs text-slate-800 leading-snug">
