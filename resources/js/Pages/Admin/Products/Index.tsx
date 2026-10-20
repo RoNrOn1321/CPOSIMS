@@ -51,6 +51,7 @@ import {
 } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
 import { useConfirm } from '@/Hooks/use-confirm';
+import { toast } from '@/Hooks/use-toast';
 
 export interface ProductItem {
   id: number;
@@ -158,9 +159,11 @@ export default function ProductsIndex({
       onSuccess: () => {
         setIsRestocking(false);
         setRestockProduct(null);
+        toast.success(`Restocked +${addQty} portions for ${restockProduct.name}.`);
       },
       onError: () => {
         setIsRestocking(false);
+        toast.error('Failed to update stock quantity.');
       },
     });
   };

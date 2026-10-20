@@ -18,4 +18,13 @@ export type PageProps<
     auth: {
         user: User;
     };
+    flash?: {
+        success?: string | null;
+        error?: string | null;
+        warning?: string | null;
+        info?: string | null;
+        status?: string | null;
+        reference_number?: string | null;
+        topup?: unknown;
+    };
 };

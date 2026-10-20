@@ -235,98 +235,100 @@ export default function ProductGrid({
       </div>
 
       {/* Product Catalog Grid */}
-      <ScrollArea className="flex-1 p-5">
-        {filteredProducts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3">
-              <Utensils size={28} />
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-5">
+          {filteredProducts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3">
+                <Utensils size={28} />
+              </div>
+              <h3 className="font-bold text-slate-700 text-base">No items match your search</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Try adjusting your search query or selecting a different category.
+              </p>
             </div>
-            <h3 className="font-bold text-slate-700 text-base">No items match your search</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              Try adjusting your search query or selecting a different category.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-12">
-            {filteredProducts.map((product) => {
-              const inCart = cartItemIds.has(product.id);
-              return (
-                <Card 
-                  key={product.id}
-                  onClick={() => onAddToCart(product)}
-                  className="group relative flex flex-col overflow-hidden bg-white border border-slate-200/80 hover:border-[#5c1516]/40 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 rounded-2xl cursor-pointer"
-                >
-                  {/* Food Image with modern overlays */}
-                  <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-                    <img 
-                      src={product.image} 
-                      alt={product.name} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      loading="lazy"
-                    />
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-12">
+              {filteredProducts.map((product) => {
+                const inCart = cartItemIds.has(product.id);
+                return (
+                  <Card 
+                    key={product.id}
+                    onClick={() => onAddToCart(product)}
+                    className="group relative flex flex-col overflow-hidden bg-white border border-slate-200/80 hover:border-[#5c1516]/40 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 rounded-2xl cursor-pointer"
+                  >
+                    {/* Food Image with modern overlays */}
+                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
+                      <img 
+                        src={product.image} 
+                        alt={product.name} 
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        loading="lazy"
+                      />
 
-                    {/* Gradient Overlay for contrast */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
+                      {/* Gradient Overlay for contrast */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
 
-                    {/* Badges on top */}
-                    <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
-                      <Badge className="bg-white/90 backdrop-blur-md text-slate-800 text-[10px] font-bold border-0 shadow-xs px-2 py-0.5 rounded-lg">
-                        {product.category}
-                      </Badge>
-
-                      {product.isPopular && (
-                        <Badge className="bg-amber-500 text-white text-[10px] font-bold border-0 shadow-xs px-2 py-0.5 rounded-lg flex items-center gap-1">
-                          <Flame size={10} /> Popular
+                      {/* Badges on top */}
+                      <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
+                        <Badge className="bg-white/90 backdrop-blur-md text-slate-800 text-[10px] font-bold border-0 shadow-xs px-2 py-0.5 rounded-lg">
+                          {product.category}
                         </Badge>
-                      )}
-                    </div>
 
-                    {/* Bottom Info inside image */}
-                    <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-white text-xs">
-                      {product.calories && (
-                        <span className="text-[11px] font-medium text-white/90 drop-shadow-sm">
-                          {product.calories} kcal
-                        </span>
-                      )}
-                      <span className="text-[11px] font-medium text-emerald-300 drop-shadow-sm">
-                        {product.stock} available
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="p-3.5 flex flex-col flex-1 justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm leading-tight group-hover:text-[#5c1516] transition-colors line-clamp-2">
-                        {product.name}
-                      </h4>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Price</span>
-                        <span className="text-base font-extrabold text-[#5c1516]">
-                          {formatMoney(product.price)}
-                        </span>
+                        {product.isPopular && (
+                          <Badge className="bg-amber-500 text-white text-[10px] font-bold border-0 shadow-xs px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <Flame size={10} /> Popular
+                          </Badge>
+                        )}
                       </div>
 
-                      <Button
-                        size="sm"
-                        className={`h-9 w-9 p-0 rounded-xl shadow-xs transition-all ${
-                          inCart 
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
-                            : 'bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold'
-                        }`}
-                      >
-                        {inCart ? <Check size={16} /> : <Plus size={16} />}
-                      </Button>
+                      {/* Bottom Info inside image */}
+                      <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-white text-xs">
+                        {product.calories && (
+                          <span className="text-[11px] font-medium text-white/90 drop-shadow-sm">
+                            {product.calories} kcal
+                          </span>
+                        )}
+                        <span className="text-[11px] font-medium text-emerald-300 drop-shadow-sm">
+                          {product.stock} available
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+
+                    {/* Card Body */}
+                    <div className="p-3.5 flex flex-col flex-1 justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-sm leading-tight group-hover:text-[#5c1516] transition-colors line-clamp-2">
+                          {product.name}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Price</span>
+                          <span className="text-base font-extrabold text-[#5c1516]">
+                            {formatMoney(product.price)}
+                          </span>
+                        </div>
+
+                        <Button
+                          size="sm"
+                          className={`h-9 w-9 p-0 rounded-xl shadow-xs transition-all ${
+                            inCart 
+                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                              : 'bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold'
+                          }`}
+                        >
+                          {inCart ? <Check size={16} /> : <Plus size={16} />}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </ScrollArea>
     </div>
   );

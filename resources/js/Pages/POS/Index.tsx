@@ -36,6 +36,7 @@ import { lookupStudent, voidTransaction } from '@/actions/App/Http/Controllers/P
 import axios from 'axios';
 import ThermalReceipt from '@/Components/POS/ThermalReceipt';
 import ConfirmDialog from '@/Components/ui/confirm-dialog';
+import { toast } from '@/Hooks/use-toast';
 
 export interface RecentTransactionItem {
   name: string;
@@ -158,7 +159,10 @@ export default function POSIndex({
   };
 
   const handleClearCart = () => {
-    setCartItems([]);
+    if (cartItems.length > 0) {
+      setCartItems([]);
+      toast.info('Current cart items cleared.');
+    }
   };
 
   // Hold / Recall Order
@@ -172,6 +176,7 @@ export default function POSIndex({
     };
     setHeldOrders(prev => [newHold, ...prev]);
     setCartItems([]);
+    toast.info(`Order ${newHold.id} put on hold.`);
   };
 
   const handleRecallOrder = (holdId: string) => {
@@ -181,6 +186,7 @@ export default function POSIndex({
       setSelectedCustomer(held.customer);
       setHeldOrders(prev => prev.filter(h => h.id !== holdId));
       setIsHeldOrdersModalOpen(false);
+      toast.success(`Order ${held.id} restored to active cart.`);
     }
   };
 
@@ -241,13 +247,14 @@ export default function POSIndex({
           prev.map(t => t.id === transactionToVoid.id ? { ...t, status: 'voided' } : t)
         );
         setActionSuccessMessage(`Receipt #${transactionToVoid.receipt_number} has been voided. Stock restored.`);
+        toast.success(`Receipt #${transactionToVoid.receipt_number} has been voided and stock restored.`);
         setTransactionToVoid(null);
 
         // Reload fresh products and transactions from server
         router.reload({ only: ['products', 'recentTransactions'] });
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to void transaction.');
+      toast.error(err.response?.data?.message || 'Failed to void transaction.');
     } finally {
       setIsVoiding(false);
     }
@@ -285,7 +292,7 @@ export default function POSIndex({
     >
       <div className="flex h-full w-full overflow-hidden">
         {/* Product Menu Grid */}
-        <div className="flex-1 min-w-0 h-full">
+        <div className="flex-1 min-w-0 h-full min-h-0 flex flex-col">
           <ProductGrid 
             onAddToCart={handleAddToCart}
             searchQuery={searchQuery}
@@ -321,6 +328,7 @@ export default function POSIndex({
         cartItems={cartItems}
         onSuccess={() => {
           setCartItems([]);
+          toast.success('Sale checkout completed successfully!');
           router.reload({ only: ['products', 'recentTransactions'] });
         }}
       />

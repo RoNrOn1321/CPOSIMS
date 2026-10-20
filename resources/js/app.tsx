@@ -5,6 +5,7 @@ import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { createRoot } from 'react-dom/client';
 import { ConfirmDialogProvider } from '@/Contexts/ConfirmDialogContext';
+import { ToastProvider } from '@/Contexts/ToastContext';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -19,9 +20,11 @@ createInertiaApp({
         const root = createRoot(el);
 
         root.render(
-            <ConfirmDialogProvider>
-                <App {...props} />
-            </ConfirmDialogProvider>
+            <ToastProvider>
+                <ConfirmDialogProvider>
+                    <App {...props} />
+                </ConfirmDialogProvider>
+            </ToastProvider>
         );
     },
     progress: {

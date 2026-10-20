@@ -171,78 +171,80 @@ export default function ActiveCart({
       </div>
 
       {/* Cart Items List */}
-      <ScrollArea className="flex-1 p-4">
-        {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-52 text-slate-400 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-2.5 text-slate-300">
-              <Receipt size={28} />
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="p-4">
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-52 text-slate-400 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-2.5 text-slate-300">
+                <Receipt size={28} />
+              </div>
+              <p className="font-bold text-slate-600 text-sm">Cart is currently empty</p>
+              <p className="text-xs text-slate-400 mt-0.5 max-w-[200px]">
+                Tap products from the menu or scan a barcode to add.
+              </p>
             </div>
-            <p className="font-bold text-slate-600 text-sm">Cart is currently empty</p>
-            <p className="text-xs text-slate-400 mt-0.5 max-w-[200px]">
-              Tap products from the menu or scan a barcode to add.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {items.map(({ product, quantity }) => (
-              <div 
-                key={product.id}
-                className="flex items-center gap-3 p-2.5 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/70 rounded-xl transition-colors"
-              >
-                {/* Thumbnail */}
-                <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex-shrink-0 border border-slate-200">
-                  <img 
-                    src={product.image} 
-                    alt={product.name} 
-                    className="w-full h-full object-cover" 
-                  />
-                </div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {items.map(({ product, quantity }) => (
+                <div 
+                  key={product.id}
+                  className="flex items-center gap-3 p-2.5 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/70 rounded-xl transition-colors"
+                >
+                  {/* Thumbnail */}
+                  <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex-shrink-0 border border-slate-200">
+                    <img 
+                      src={product.image} 
+                      alt={product.name} 
+                      className="w-full h-full object-cover" 
+                    />
+                  </div>
 
-                {/* Details */}
-                <div className="flex-1 min-w-0">
-                  <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">
-                    {product.name}
-                  </h5>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    {formatMoney(product.price)} each
+                  {/* Details */}
+                  <div className="flex-1 min-w-0">
+                    <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">
+                      {product.name}
+                    </h5>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {formatMoney(product.price)} each
+                    </div>
+                  </div>
+
+                  {/* Quantity Controls */}
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-1.5 py-1 rounded-lg shadow-2xs">
+                    <button
+                      onClick={() => onUpdateQuantity(product.id, Math.max(1, quantity - 1))}
+                      className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                    >
+                      <Minus size={12} />
+                    </button>
+                    <span className="w-5 text-center text-xs font-bold text-slate-800">
+                      {quantity}
+                    </span>
+                    <button
+                      onClick={() => onUpdateQuantity(product.id, quantity + 1)}
+                      className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                    >
+                      <Plus size={12} />
+                    </button>
+                  </div>
+
+                  {/* Total & Remove */}
+                  <div className="text-right flex flex-col items-end gap-1 min-w-[58px]">
+                    <span className="text-xs font-extrabold text-[#5c1516]">
+                      {formatMoney(product.price * quantity)}
+                    </span>
+                    <button
+                      onClick={() => onRemoveItem(product.id)}
+                      className="text-slate-300 hover:text-red-500 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                 </div>
-
-                {/* Quantity Controls */}
-                <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-1.5 py-1 rounded-lg shadow-2xs">
-                  <button
-                    onClick={() => onUpdateQuantity(product.id, Math.max(1, quantity - 1))}
-                    className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                  >
-                    <Minus size={12} />
-                  </button>
-                  <span className="w-5 text-center text-xs font-bold text-slate-800">
-                    {quantity}
-                  </span>
-                  <button
-                    onClick={() => onUpdateQuantity(product.id, quantity + 1)}
-                    className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                  >
-                    <Plus size={12} />
-                  </button>
-                </div>
-
-                {/* Total & Remove */}
-                <div className="text-right flex flex-col items-end gap-1 min-w-[58px]">
-                  <span className="text-xs font-extrabold text-[#5c1516]">
-                    {formatMoney(product.price * quantity)}
-                  </span>
-                  <button
-                    onClick={() => onRemoveItem(product.id)}
-                    className="text-slate-300 hover:text-red-500 transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </ScrollArea>
 
       {/* Cart Summary & Action Station */}
