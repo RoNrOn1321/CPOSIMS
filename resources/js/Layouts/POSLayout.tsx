@@ -87,7 +87,7 @@ export default function POSLayout({
             />
             <NavRailItem 
               icon={<Settings size={20} />} 
-              label="Config" 
+              label="Settings" 
               onClick={onConfigClick}
             />
           </nav>
@@ -184,11 +184,16 @@ export default function POSLayout({
               )}
             </Button>
 
-            {/* Barcode Quick Trigger */}
-            <div className="h-10 px-3 bg-white/10 border border-white/15 rounded-xl flex items-center gap-2 text-white/90 text-xs">
+            {/* Barcode / RFID Input Quick Trigger */}
+            <button
+              type="button"
+              onClick={onConfigClick}
+              title="Barcode Scanner & RFID Input (F2) - Click to configure Terminal Settings"
+              className="h-10 px-3 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl flex items-center gap-2 text-white/90 text-xs transition-colors cursor-pointer"
+            >
               <Barcode size={18} className="text-amber-300" />
-              <span className="hidden xl:inline text-[11px] font-medium text-amber-100">Scanner Ready</span>
-            </div>
+              <span className="hidden xl:inline text-[11px] font-medium text-amber-100">Barcode / RFID (F2)</span>
+            </button>
 
             {/* Cashier Badge & Functional Header Logout */}
             <div className="flex items-center gap-2.5 pl-2 ml-1 border-l border-white/20">

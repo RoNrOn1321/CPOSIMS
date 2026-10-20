@@ -689,7 +689,7 @@ export default function POSIndex({
         onClose={() => setIsReloadModalOpen(false)}
       />
 
-      {/* Terminal & Hardware Diagnostics Dialog */}
+      {/* Terminal & Station Settings Dialog */}
       <PosHardwareDiagnosticsModal
         isOpen={isDiagnosticsModalOpen}
         onClose={() => setIsDiagnosticsModalOpen(false)}
