@@ -164,7 +164,7 @@ printReceipt.post = (options?: RouteQueryOptions): RouteDefinition<'post'> => ({
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 export const voidTransaction = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
@@ -179,7 +179,7 @@ voidTransaction.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.url = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions) => {
@@ -212,7 +212,7 @@ voidTransaction.url = (args: { transaction: number | { id: number } } | [transac
 
 /**
 * @see \App\Http\Controllers\PosController::voidTransaction
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 voidTransaction.post = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({

@@ -1,7 +1,7 @@
 import { queryParams, type RouteQueryOptions, type RouteDefinition, applyUrlDefaults } from './../../../wayfinder'
 /**
 * @see \App\Http\Controllers\PosController::voidMethod
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 export const voidMethod = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({
@@ -16,7 +16,7 @@ voidMethod.definition = {
 
 /**
 * @see \App\Http\Controllers\PosController::voidMethod
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 voidMethod.url = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions) => {
@@ -49,7 +49,7 @@ voidMethod.url = (args: { transaction: number | { id: number } } | [transaction:
 
 /**
 * @see \App\Http\Controllers\PosController::voidMethod
- * @see app/Http/Controllers/PosController.php:492
+ * @see app/Http/Controllers/PosController.php:495
  * @route '/pos/transactions/{transaction}/void'
  */
 voidMethod.post = (args: { transaction: number | { id: number } } | [transaction: number | { id: number } ] | number | { id: number }, options?: RouteQueryOptions): RouteDefinition<'post'> => ({

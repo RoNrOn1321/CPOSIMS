@@ -20,6 +20,7 @@ import {
 import { Link } from '@inertiajs/react';
 import { index as parentDashboardIndex } from '@/actions/App/Http/Controllers/ParentDashboardController';
 import { index as posIndex } from '@/actions/App/Http/Controllers/PosController';
+import { dashboard as adminDashboardRoute } from '@/routes/admin';
 import { index as productsIndex } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import { index as studentsIndex } from '@/actions/App/Http/Controllers/Admin/StudentAccountController';
 import { index as auditLogsIndex } from '@/actions/App/Http/Controllers/Admin/AuditLogController';
@@ -195,7 +196,7 @@ export default function AdminLayout({
                     icon={<LayoutDashboard size={18} />} 
                     label="Dashboard" 
                     active={activeNav === 'dashboard'}
-                    href={productsIndex.url()}
+                    href={adminDashboardRoute.url()}
                   />
                   <SidebarNavItem 
                     icon={<Users size={18} />} 

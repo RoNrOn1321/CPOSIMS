@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\SettingController;
@@ -32,7 +33,7 @@ Route::get('/', function () {
 // Central Dashboard redirector
 Route::get('/dashboard', function () {
     return match (auth()->user()->role) {
-        'admin' => redirect()->route('admin.products.index'),
+        'admin' => redirect()->route('admin.dashboard'),
         'cashier' => redirect()->route('pos.index'),
         'parent' => redirect()->route('parent.dashboard'),
         default => Inertia::render('Dashboard'),
@@ -60,9 +61,8 @@ Route::middleware(['auth', 'active', 'role:parent|admin'])->prefix('parent')->na
 
 // Admin Panel Routes - Admin Access
 Route::middleware(['auth', 'active', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
-    Route::get('/', function () {
-        return redirect()->route('admin.products.index');
-    });
+    Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard.index');
 
     Route::resource('products', ProductController::class);
     Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit-logs.index');
