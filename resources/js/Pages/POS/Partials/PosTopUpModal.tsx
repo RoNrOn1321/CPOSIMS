@@ -177,10 +177,13 @@ export default function PosTopUpModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white">
+      <DialogContent 
+        className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white"
+        closeButtonClassName="text-white/80 hover:text-white hover:bg-white/10"
+      >
         {/* Header with STCT Maroon & Gold Palette */}
         <div className="bg-[#5c1516] text-white p-5 border-b-2 border-[#d38c28]">
-          <DialogHeader className="text-left space-y-1">
+          <DialogHeader className="text-left space-y-1 pr-10">
             <div className="flex items-center justify-between">
               <Badge className="bg-[#d38c28] text-amber-950 hover:bg-[#d38c28] font-bold text-[10px] px-2 py-0.5 rounded shadow-xs">
                 WALK-IN CASH RELOAD

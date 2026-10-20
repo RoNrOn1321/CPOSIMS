@@ -312,10 +312,13 @@ export default function CheckoutModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white">
+      <DialogContent 
+        className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl bg-white"
+        closeButtonClassName="text-white/80 hover:text-white hover:bg-white/10"
+      >
         {/* Header */}
         <div className="bg-[#5c1516] text-white p-6 relative">
-          <DialogHeader className="text-left space-y-1">
+          <DialogHeader className="text-left space-y-1 pr-10">
             <div className="flex items-center justify-between">
               <Badge className="bg-amber-400 text-amber-950 font-bold border-0 text-[10px] px-2 py-0.5">
                 PAYMENT CHECKOUT

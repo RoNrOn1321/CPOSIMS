@@ -6,6 +6,7 @@ import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
 import CheckoutModal from './Partials/CheckoutModal';
 import PosTopUpModal from './Partials/PosTopUpModal';
 import PosHardwareDiagnosticsModal from './Partials/PosHardwareDiagnosticsModal';
+import PosStockModal from './Partials/PosStockModal';
 import {
   Dialog,
   DialogContent,
@@ -106,6 +107,7 @@ export default function POSIndex({
   const [isReloadModalOpen, setIsReloadModalOpen] = useState<boolean>(false);
   const [isOrdersModalOpen, setIsOrdersModalOpen] = useState<boolean>(false);
   const [isDiagnosticsModalOpen, setIsDiagnosticsModalOpen] = useState<boolean>(false);
+  const [isStockModalOpen, setIsStockModalOpen] = useState<boolean>(false);
 
   // Recent transactions list state
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>(initialTransactions);
@@ -287,6 +289,7 @@ export default function POSIndex({
       onReloadClick={() => setIsReloadModalOpen(true)}
       onOrdersClick={() => setIsOrdersModalOpen(true)}
       onRefundsClick={() => setIsOrdersModalOpen(true)}
+      onStockClick={() => setIsStockModalOpen(true)}
       onConfigClick={() => setIsDiagnosticsModalOpen(true)}
       cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
     >
@@ -336,7 +339,7 @@ export default function POSIndex({
       {/* Student / Customer Selector Dialog with Live RFID / ID Lookup */}
       <Dialog open={isCustomerModalOpen} onOpenChange={setIsCustomerModalOpen}>
         <DialogContent className="sm:max-w-[460px] rounded-2xl">
-          <DialogHeader>
+          <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2 text-slate-800">
               <Users size={18} className="text-[#5c1516]" />
               Select Student or Staff Account
@@ -462,8 +465,8 @@ export default function POSIndex({
       {/* Recent Orders & Voids Dialog */}
       <Dialog open={isOrdersModalOpen} onOpenChange={setIsOrdersModalOpen}>
         <DialogContent className="sm:max-w-[620px] rounded-2xl max-h-[85vh] flex flex-col p-6">
-          <DialogHeader className="pb-3 border-b border-slate-100">
-            <div className="flex items-center justify-between">
+          <DialogHeader className="pb-3 border-b border-slate-100 pr-10">
+            <div className="flex items-center gap-2.5">
               <DialogTitle className="flex items-center gap-2 text-slate-800 text-base">
                 <History size={20} className="text-[#5c1516]" />
                 Recent Orders & Refund Voids
@@ -573,7 +576,7 @@ export default function POSIndex({
       {/* Reprint Thermal Receipt Dialog */}
       <Dialog open={!!transactionToPrint} onOpenChange={(open) => !open && setTransactionToPrint(null)}>
         <DialogContent className="sm:max-w-[420px] max-h-[90vh] overflow-y-auto rounded-2xl">
-          <DialogHeader>
+          <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2 text-slate-800 text-base">
               <Printer size={18} className="text-[#5c1516]" />
               Print 58mm Thermal Receipt
@@ -636,7 +639,7 @@ export default function POSIndex({
       {/* Held Orders Recall Dialog */}
       <Dialog open={isHeldOrdersModalOpen} onOpenChange={setIsHeldOrdersModalOpen}>
         <DialogContent className="sm:max-w-[460px] rounded-2xl">
-          <DialogHeader>
+          <DialogHeader className="pr-10">
             <DialogTitle className="flex items-center gap-2 text-slate-800">
               <Clock size={18} className="text-amber-600" />
               Held Orders Recall
@@ -694,6 +697,18 @@ export default function POSIndex({
         isOpen={isDiagnosticsModalOpen}
         onClose={() => setIsDiagnosticsModalOpen(false)}
         products={products}
+      />
+
+      {/* Real-Time Stock & Inventory Dialog */}
+      <PosStockModal
+        isOpen={isStockModalOpen}
+        onClose={() => setIsStockModalOpen(false)}
+        products={products}
+        categories={categories}
+        onAddToCart={(product) => {
+          handleAddToCart(product);
+          toast.success(`Added ${product.name} to cart.`);
+        }}
       />
     </POSLayout>
   );
