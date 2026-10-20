@@ -166,7 +166,6 @@ class ReportController extends Controller
             'Payment Method',
             'Total Amount (PHP)',
             'Amount Tendered (PHP)',
-            'Change Amount (PHP)',
             'Status',
         ];
 
@@ -193,7 +192,6 @@ class ReportController extends Controller
                         strtoupper($tx->payment_method),
                         (float) $tx->total_amount,
                         (float) $tx->amount_tendered,
-                        (float) $tx->change_amount,
                         strtoupper($tx->status),
                     ], null, "A{$rowNumber}");
 
@@ -209,9 +207,9 @@ class ReportController extends Controller
             $sheet->getStyle("B2:B{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("D2:D{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("F2:F{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("J2:J{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("I2:I{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-            $sheet->getStyle("G2:I{$lastRow}")
+            $sheet->getStyle("G2:H{$lastRow}")
                 ->getNumberFormat()
                 ->setFormatCode(NumberFormat::FORMAT_NUMBER_COMMA_SEPARATED1);
         }
@@ -490,7 +488,6 @@ class ReportController extends Controller
                 'Payment Method',
                 'Total Amount (PHP)',
                 'Amount Tendered (PHP)',
-                'Change Amount (PHP)',
                 'Status',
             ]);
 
@@ -514,7 +511,6 @@ class ReportController extends Controller
                             strtoupper($tx->payment_method),
                             number_format((float) $tx->total_amount, 2, '.', ''),
                             number_format((float) $tx->amount_tendered, 2, '.', ''),
-                            number_format((float) $tx->change_amount, 2, '.', ''),
                             strtoupper($tx->status),
                         ]);
                     }
