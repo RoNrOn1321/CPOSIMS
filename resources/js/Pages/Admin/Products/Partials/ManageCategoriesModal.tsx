@@ -154,18 +154,11 @@ export default function ManageCategoriesModal({
           {/* Form Area: Create or Edit Category */}
           {(isCreating || editingCategory) && (
             <form onSubmit={handleSubmit} className="p-4 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-3 animate-in fade-in-50 duration-200">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center">
                 <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   {editingCategory ? <Edit size={13} className="text-[#5c1516]" /> : <Plus size={13} className="text-[#5c1516]" />}
                   {editingCategory ? `Edit Category: ${editingCategory.name}` : 'New Category Details'}
                 </span>
-                <button
-                  type="button"
-                  onClick={handleCancelForm}
-                  className="text-xs text-slate-400 hover:text-slate-600 cursor-pointer"
-                >
-                  Cancel
-                </button>
               </div>
 
               <div className="space-y-2">
