@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
 import { Student, Transaction } from './types';
 import StudentHeader from './Partials/StudentHeader';
 import QuickStatsGrid from './Partials/QuickStatsGrid';
@@ -100,44 +99,53 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
         weeklyTotal={weeklyTotal}
       />
 
-      {/* 3. Main Navigation Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-5">
-        <TabsList className="bg-white border border-slate-200 p-1 rounded-2xl h-12 shadow-xs grid grid-cols-3 w-full md:w-fit">
-          <TabsTrigger value="overview" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
-            Overview & Analytics
-          </TabsTrigger>
-          <TabsTrigger value="history" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
-            Meal History (Receipts)
-          </TabsTrigger>
-          <TabsTrigger value="limits" className="rounded-xl text-xs font-bold data-[state=active]:bg-[#5c1516] data-[state=active]:text-white">
-            Daily Allowance Limits
-          </TabsTrigger>
-        </TabsList>
+      {/* 3. Section Views (Controlled cleanly by Sidebar on Desktop, with compact switcher on Mobile) */}
+      <div className="w-full space-y-4">
+        {/* Mobile-only view switcher pills */}
+        <div className="md:hidden flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl overflow-x-auto">
+          {[
+            { id: 'overview', label: 'Overview' },
+            { id: 'history', label: 'Meal History' },
+            { id: 'limits', label: 'Spending Limits' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                activeTab === tab.id
+                  ? 'bg-[#5c1516] text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
         {/* Tab 1: Overview & Analytics */}
-        <TabsContent value="overview" className="m-0">
+        {activeTab === 'overview' && (
           <OverviewTab
             student={currentStudent}
             todayTransaction={todayTransaction}
             onViewReceipt={setSelectedReceipt}
           />
-        </TabsContent>
+        )}
 
         {/* Tab 2: Meal History */}
-        <TabsContent value="history" className="m-0">
+        {activeTab === 'history' && (
           <MealHistoryTab
             transactions={studentTransactions}
             onViewReceipt={setSelectedReceipt}
           />
-        </TabsContent>
+        )}
 
         {/* Tab 3: Daily Allowance Limits */}
-        <TabsContent value="limits" className="m-0">
+        {activeTab === 'limits' && (
           <SpendingLimitsTab
             student={currentStudent}
           />
-        </TabsContent>
-      </Tabs>
+        )}
+      </div>
 
       {/* Modals */}
       <TopUpModal

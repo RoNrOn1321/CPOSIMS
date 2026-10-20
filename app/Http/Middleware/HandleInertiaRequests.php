@@ -62,6 +62,9 @@ class HandleInertiaRequests extends Middleware
                 'topup' => fn () => $request->session()->get('topup'),
             ],
             'system_notifications' => fn () => $user ? $this->getSystemNotifications($user) : [],
+            'enrolled_students_count' => fn () => ($user && ($user->role === 'parent' || (method_exists($user, 'hasRole') && $user->hasRole('parent'))))
+                ? StudentAccount::where('parent_id', $user->id)->count()
+                : 0,
         ];
     }
 
@@ -175,21 +178,48 @@ class HandleInertiaRequests extends Middleware
                 $recentPurchases = Transaction::whereIn('student_account_id', $students->pluck('id'))
                     ->where('status', 'completed')
                     ->latest()
+                    ->with('studentAccount:id,first_name,last_name')
                     ->limit(5)
                     ->get();
 
                 foreach ($recentPurchases as $purchase) {
                     $amountFormatted = number_format((float) $purchase->total_amount, 2);
+                    $childName = $purchase->studentAccount ? $purchase->studentAccount->first_name : 'Student';
+                    $methodLabel = $purchase->payment_method === 'cashless' ? 'RFID Card' : 'Cash';
                     $notifications[] = [
                         'id' => "purchase-{$purchase->id}",
-                        'type' => 'info',
-                        'title' => 'Cafeteria Purchase',
-                        'message' => "PHP {$amountFormatted} paid via ".strtoupper($purchase->payment_method).'.',
+                        'type' => 'purchase',
+                        'title' => "Meal Purchase: {$childName}",
+                        'message' => "PHP {$amountFormatted} paid via {$methodLabel}.",
                         'severity' => 'info',
                         'time' => $purchase->created_at->diffForHumans(),
                         'timestamp' => $purchase->created_at->timestamp,
                         'actionUrl' => route('parent.dashboard'),
                         'actionLabel' => 'View Meal History',
+                    ];
+                }
+
+                // Recent RFID reloads for parent's students
+                $recentStudentTopups = BalanceTopup::whereIn('student_account_id', $students->pluck('id'))
+                    ->latest()
+                    ->with('studentAccount:id,first_name,last_name')
+                    ->limit(5)
+                    ->get();
+
+                foreach ($recentStudentTopups as $topup) {
+                    $childName = $topup->studentAccount ? $topup->studentAccount->first_name : 'Student';
+                    $amountFormatted = number_format((float) $topup->amount, 2);
+                    $newBalFormatted = number_format((float) $topup->new_balance, 2);
+                    $notifications[] = [
+                        'id' => "topup-{$topup->id}",
+                        'type' => 'topup',
+                        'title' => "RFID Reloaded: {$childName}",
+                        'message' => "PHP {$amountFormatted} added. New balance: PHP {$newBalFormatted}.",
+                        'severity' => 'success',
+                        'time' => $topup->created_at->diffForHumans(),
+                        'timestamp' => $topup->created_at->timestamp,
+                        'actionUrl' => route('parent.dashboard'),
+                        'actionLabel' => 'View Balance',
                     ];
                 }
             }

@@ -14,6 +14,7 @@ import {
   RefreshCw, 
   CheckCircle2, 
   ChevronRight,
+  Utensils,
   X
 } from 'lucide-react';
 import { ScrollArea } from '@/Components/ui/scroll-area';
@@ -29,10 +30,12 @@ const STORAGE_KEY = 'cposims_read_notifications';
 export default function NotificationsDropdown({ onTopUpClick }: NotificationsDropdownProps) {
   const pageProps = usePage<PageProps>().props;
   const notifications: SystemNotification[] = pageProps.system_notifications || [];
+  const user = pageProps.auth?.user;
+  const isParent = user?.role === 'parent';
 
   const [isOpen, setIsOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'stock' | 'void' | 'topup'>('all');
+  const [filter, setFilter] = useState<'all' | 'stock' | 'void' | 'topup' | 'purchase' | 'balance'>('all');
   
   // Track read notification IDs in localStorage
   const [readIds, setReadIds] = useState<string[]>(() => {
@@ -129,9 +132,11 @@ export default function NotificationsDropdown({ onTopUpClick }: NotificationsDro
 
   const filteredNotifications = useMemo(() => {
     if (filter === 'all') return notifications;
+    if (filter === 'purchase') return notifications.filter(n => n.type === 'purchase');
+    if (filter === 'balance') return notifications.filter(n => n.type === 'balance');
+    if (filter === 'topup') return notifications.filter(n => n.type === 'topup');
     if (filter === 'stock') return notifications.filter(n => n.type === 'stock');
     if (filter === 'void') return notifications.filter(n => n.type === 'void');
-    if (filter === 'topup') return notifications.filter(n => n.type === 'topup' || n.type === 'balance');
     return notifications;
   }, [notifications, filter]);
 
@@ -197,6 +202,12 @@ export default function NotificationsDropdown({ onTopUpClick }: NotificationsDro
             <CreditCard size={15} />
           </div>
         );
+      case 'purchase':
+        return (
+          <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+            <Utensils size={15} />
+          </div>
+        );
       default:
         return (
           <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
@@ -241,7 +252,7 @@ export default function NotificationsDropdown({ onTopUpClick }: NotificationsDro
               </div>
               <div>
                 <h3 className="text-xs font-black tracking-tight text-white flex items-center gap-2">
-                  System Alerts
+                  {isParent ? 'Cafeteria Alerts' : 'System Alerts'}
                   {unreadCount > 0 && (
                     <span className="bg-amber-400 text-amber-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
                       {unreadCount} new
@@ -249,7 +260,9 @@ export default function NotificationsDropdown({ onTopUpClick }: NotificationsDro
                   )}
                 </h3>
                 <p className="text-[10px] text-amber-200/80 font-medium">
-                  Inventory, cashier voids & reloads
+                  {isParent 
+                    ? 'Child purchases, receipts & balance warnings' 
+                    : 'Inventory, cashier voids & reloads'}
                 </p>
               </div>
             </div>
@@ -279,21 +292,34 @@ export default function NotificationsDropdown({ onTopUpClick }: NotificationsDro
           </div>
 
           {/* Quick Filter Badges (if multiple notifications) */}
-          {notifications.length > 3 && (
-            <div className="flex items-center gap-1 px-3 py-2 bg-slate-50 border-b border-slate-100 text-[11px]">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">Filter:</span>
-              {(['all', 'stock', 'void', 'topup'] as const).map(tab => (
+          {notifications.length > 2 && (
+            <div className="flex items-center gap-1 px-3 py-2 bg-slate-50 border-b border-slate-100 text-[11px] overflow-x-auto">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1 shrink-0">Filter:</span>
+              {(isParent
+                ? [
+                    { id: 'all', label: 'All' },
+                    { id: 'purchase', label: 'Purchases' },
+                    { id: 'balance', label: 'Balance' },
+                    { id: 'topup', label: 'Top-Ups' },
+                  ]
+                : [
+                    { id: 'all', label: 'All' },
+                    { id: 'stock', label: 'Stock' },
+                    { id: 'void', label: 'Voids' },
+                    { id: 'topup', label: 'Top-Ups' },
+                  ]
+              ).map(tab => (
                 <button
-                  key={tab}
+                  key={tab.id}
                   type="button"
-                  onClick={() => setFilter(tab)}
-                  className={`px-2 py-0.5 rounded-md font-bold text-[10px] capitalize transition-colors cursor-pointer ${
-                    filter === tab 
+                  onClick={() => setFilter(tab.id as typeof filter)}
+                  className={`px-2 py-0.5 rounded-md font-bold text-[10px] capitalize transition-colors cursor-pointer shrink-0 ${
+                    filter === tab.id 
                       ? 'bg-[#5c1516] text-white shadow-2xs' 
                       : 'text-slate-600 hover:bg-slate-200/60'
                   }`}
                 >
-                  {tab === 'all' ? 'All' : tab === 'stock' ? 'Stock' : tab === 'void' ? 'Voids' : 'Top-Ups'}
+                  {tab.label}
                 </button>
               ))}
             </div>

@@ -53,8 +53,9 @@ export default function AdminLayout({
   unreadNotificationsCount,
 }: AdminLayoutProps) {
   const isParent = portal === 'parent';
-  const { auth } = usePage<PageProps>().props;
+  const { auth, enrolled_students_count } = usePage<PageProps>().props;
   const user = auth?.user;
+  const enrolledCount = enrolled_students_count ?? 0;
 
   const userInitials = user?.full_name
     ? user.full_name
@@ -101,14 +102,16 @@ export default function AdminLayout({
 
         {/* Right: Quick Actions, Role Info & Logout */}
         <div className="flex items-center gap-3">
-          {/* Quick POS Access for testing/staff */}
-          <Link
-            href={posIndex.url()}
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold border border-white/15 transition-all"
-          >
-            <span>POS Register</span>
-            <ExternalLink size={13} />
-          </Link>
+          {/* Quick POS Access for testing/staff only (Never visible for parents) */}
+          {!isParent && (
+            <Link
+              href={posIndex.url()}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold border border-white/15 transition-all"
+            >
+              <span>POS Register</span>
+              <ExternalLink size={13} />
+            </Link>
+          )}
 
           {/* Top-up CTA for parents */}
           {isParent && onTopUpClick && (
@@ -174,7 +177,9 @@ export default function AdminLayout({
                   {isParent ? 'Family Dashboard' : 'Management Center'}
                 </h4>
                 <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                  {isParent ? '2 Enrolled Students' : 'System Administration'}
+                  {isParent 
+                    ? `${enrolledCount} Enrolled ${enrolledCount === 1 ? 'Student' : 'Students'}`
+                    : 'System Administration'}
                 </p>
               </div>
             </div>

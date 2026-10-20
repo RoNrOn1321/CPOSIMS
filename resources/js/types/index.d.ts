@@ -14,7 +14,7 @@ export interface User {
 
 export interface SystemNotification {
     id: string;
-    type: 'stock' | 'void' | 'topup' | 'balance' | 'info';
+    type: 'stock' | 'void' | 'topup' | 'balance' | 'info' | 'purchase';
     title: string;
     message: string;
     time: string;
@@ -31,6 +31,7 @@ export type PageProps<
         user: User;
     };
     system_notifications?: SystemNotification[];
+    enrolled_students_count?: number;
     flash?: {
         success?: string | null;
         error?: string | null;

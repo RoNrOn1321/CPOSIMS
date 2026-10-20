@@ -155,8 +155,8 @@ class RolesAndPermissionsSeeder extends Seeder
             ['student_id_number' => '2026-0001'],
             [
                 'rfid_uid' => 'E28011700000020',
-                'first_name' => 'Theresian',
-                'last_name' => 'Student',
+                'first_name' => 'Therese',
+                'last_name' => 'Dela Cruz',
                 'grade_level' => 'Grade 10',
                 'section' => 'St. Theresa',
                 'parent_id' => $parent->id,
