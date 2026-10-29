@@ -13,7 +13,7 @@ export interface Product {
   price: number;
   calories?: number;
   stock: number;
-  image: string;
+  image?: string | null;
   isPopular?: boolean;
   barcode?: string | null;
 }
@@ -140,20 +140,38 @@ export default function ProductGrid({
                     onClick={() => onAddToCart(product)}
                     className="group relative flex flex-col overflow-hidden bg-white border border-slate-200/80 hover:border-[#5c1516]/40 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 rounded-2xl cursor-pointer"
                   >
-                    {/* Food Image with modern overlays */}
-                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-                      <img 
-                        src={product.image} 
-                        alt={product.name} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        loading="lazy"
-                      />
+                    {/* Product Image / Visual Header */}
+                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100 flex items-center justify-center">
+                      {product.image ? (
+                        <>
+                          <img 
+                            src={product.image} 
+                            alt={product.name} 
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            loading="lazy"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              const parent = e.currentTarget.parentElement;
+                              const fallbackEl = parent?.querySelector('.product-fallback-ui');
+                              if (fallbackEl) {
+                                fallbackEl.classList.remove('hidden');
+                              }
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity pointer-events-none" />
+                        </>
+                      ) : null}
 
-                      {/* Gradient Overlay for contrast */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
+                      {/* Clean Fallback Graphic when no image or image failed */}
+                      <div className={`product-fallback-ui absolute inset-0 bg-gradient-to-br from-slate-100 via-rose-50/40 to-slate-200/60 flex flex-col items-center justify-center ${product.image ? 'hidden' : ''}`}>
+                        <div className="w-12 h-12 rounded-2xl bg-white/90 shadow-xs border border-slate-200/60 flex items-center justify-center text-[#5c1516]/70 group-hover:scale-110 transition-transform">
+                          {getCategoryIcon(product.category)}
+                        </div>
+                      </div>
 
                       {/* Badges on top */}
-                      <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
+                      <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none z-10">
                         <Badge className="bg-white/90 backdrop-blur-md text-slate-800 text-[10px] font-bold border-0 shadow-xs px-2 py-0.5 rounded-lg">
                           {product.category}
                         </Badge>
@@ -165,14 +183,18 @@ export default function ProductGrid({
                         )}
                       </div>
 
-                      {/* Bottom Info inside image */}
-                      <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-white text-xs">
+                      {/* Bottom Info inside header */}
+                      <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-xs z-10 pointer-events-none">
                         {product.calories && (
                           <span className="text-[11px] font-medium text-white/90 drop-shadow-sm">
                             {product.calories} kcal
                           </span>
                         )}
-                        <span className="text-[11px] font-medium text-emerald-300 drop-shadow-sm">
+                        <span className={`text-[11px] font-bold drop-shadow-sm ml-auto ${
+                          product.image 
+                            ? (product.stock <= 5 ? 'text-amber-300' : 'text-emerald-300')
+                            : (product.stock <= 5 ? 'text-amber-700' : 'text-emerald-700')
+                        }`}>
                           {product.stock} available
                         </span>
                       </div>

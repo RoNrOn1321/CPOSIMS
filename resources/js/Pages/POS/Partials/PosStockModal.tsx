@@ -298,6 +298,7 @@ export default function PosStockModal({
                         <img
                           src={product.image}
                           alt={product.name}
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
                           onError={(e) => {
                             (e.target as HTMLElement).style.display = 'none';

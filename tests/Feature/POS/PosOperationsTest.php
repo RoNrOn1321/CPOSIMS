@@ -66,13 +66,10 @@ it('renders POS register with live active products, categories, and recent trans
 
             return $items->contains('id', $activeProduct->id)
                 && $ballpen !== null
-                && $ballpen['image'] === 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=400&q=80'
+                && $ballpen['image'] === null
                 && $water !== null
-                && $water['image'] === 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400&q=80'
                 && $sandwich !== null
-                && $sandwich['image'] === 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80'
-                && $meal !== null
-                && $meal['image'] === 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
+                && $meal !== null;
         })
         ->has('categories')
         ->has('recentTransactions', 1)

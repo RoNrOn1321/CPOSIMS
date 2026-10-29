@@ -23,7 +23,7 @@ export interface CartItem {
     id: number;
     name: string;
     price: number;
-    image: string;
+    image?: string | null;
     category?: string;
   };
   quantity: number;
@@ -191,12 +191,24 @@ export default function ActiveCart({
                   className="flex items-center gap-3 p-2.5 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/70 rounded-xl transition-colors"
                 >
                   {/* Thumbnail */}
-                  <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex-shrink-0 border border-slate-200">
-                    <img 
-                      src={product.image} 
-                      alt={product.name} 
-                      className="w-full h-full object-cover" 
-                    />
+                  <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex-shrink-0 border border-slate-200 flex items-center justify-center relative">
+                    {product.image ? (
+                      <img 
+                        src={product.image} 
+                        alt={product.name} 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover" 
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const parent = e.currentTarget.parentElement;
+                          const fallback = parent?.querySelector('.cart-no-img');
+                          if (fallback) fallback.classList.remove('hidden');
+                        }}
+                      />
+                    ) : null}
+                    <div className={`cart-no-img text-slate-400 flex items-center justify-center ${product.image ? 'hidden' : ''}`}>
+                      <Receipt size={16} />
+                    </div>
                   </div>
 
                   {/* Details */}

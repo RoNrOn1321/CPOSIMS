@@ -27,13 +27,6 @@ export interface ProductImageInputProps {
   urlError?: string;
 }
 
-const SAMPLE_IMAGE_LINKS = [
-  { label: 'Rice Meal', url: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&q=80' },
-  { label: 'Sandwich', url: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=600&q=80' },
-  { label: 'Beverage', url: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=600&q=80' },
-  { label: 'School Supplies', url: 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=600&q=80' },
-];
-
 export default function ProductImageInput({
   initialImageUrl,
   initialSource = 'upload',
@@ -329,31 +322,8 @@ export default function ProductImageInput({
               )}
             </div>
             <p className="text-[10px] text-slate-400 mt-1">
-              Images will be automatically imported and cached for seamless offline cashier use.
+              Paste a direct HTTPS image URL from the web.
             </p>
-          </div>
-
-          {/* Quick presets */}
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Quick Sample Presets:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {SAMPLE_IMAGE_LINKS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => handleWebUrlChange(preset.url)}
-                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
-                    webUrl === preset.url
-                      ? 'bg-[#5c1516] text-white border-[#5c1516]'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {urlError && (
@@ -382,6 +352,7 @@ export default function ProductImageInput({
               <img
                 src={activePreview}
                 alt="Product preview"
+                referrerPolicy="no-referrer"
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 onLoad={() => setWebImageStatus('valid')}
                 onError={() => {
@@ -417,7 +388,7 @@ export default function ProductImageInput({
               </div>
               <span className="text-xs font-bold text-slate-500">No Image Selected</span>
               <span className="text-[10px] text-slate-400">
-                {isRemoved ? 'Image removed. Category placeholder will be used.' : 'Select an upload or paste an internet image link.'}
+                {isRemoved ? 'Image removed. Product will display with a clean icon placeholder.' : 'Select an upload or paste an internet image link.'}
               </span>
             </div>
           )}

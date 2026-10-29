@@ -215,9 +215,7 @@ class ProductController extends Controller
                 $this->deleteStoredImage($existingProduct->image_path);
             }
 
-            $localPath = $this->downloadRemoteImage($imageUrl);
-
-            return $localPath ?? $imageUrl;
+            return $imageUrl;
         }
 
         // 4. Retain existing product image

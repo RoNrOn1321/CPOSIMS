@@ -52,8 +52,8 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
     status: (product.status ?? 'active') as 'active' | 'inactive',
     remarks: '',
     image_file: null as File | null,
-    image_url: '',
-    image_source: 'none' as 'upload' | 'url' | 'none',
+    image_url: product.image_path && (product.image_path.startsWith('http://') || product.image_path.startsWith('https://')) ? product.image_path : '',
+    image_source: product.image_path ? (product.image_path.startsWith('http') ? 'url' : 'upload') : ('none' as 'upload' | 'url' | 'none'),
     remove_image: false,
   });
 

@@ -100,15 +100,6 @@ interface ProductsIndexProps {
   };
 }
 
-const categoryPlaceholders: Record<string, string> = {
-  'Rice Meals': 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
-  'Snacks & Sandwiches': 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=80',
-  'Beverages': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&q=80',
-  'Bakery': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
-  'Healthy': 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
-  'School Supplies': 'https://images.unsplash.com/photo-1456735190827-d1262f71b8a3?w=400&q=80',
-};
-
 export default function ProductsIndex({ 
   products, 
   categories = [], 
@@ -208,23 +199,30 @@ export default function ProductsIndex({
       ),
       cell: ({ row }) => {
         const item = row.original;
-        const catName = item.category?.name || 'Snacks & Sandwiches';
-        const fallbackImg = categoryPlaceholders[catName] || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80';
-        const displayImg = item.image_url || fallbackImg;
+        const displayImg = item.image_url;
 
         return (
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200">
-              <img 
-                src={displayImg} 
-                alt={item.name} 
-                className="w-full h-full object-cover" 
-                onError={(e) => {
-                  if (e.currentTarget.src !== fallbackImg) {
-                    e.currentTarget.src = fallbackImg;
-                  }
-                }}
-              />
+            <div className="w-11 h-11 rounded-xl bg-slate-100 overflow-hidden shrink-0 border border-slate-200 flex items-center justify-center relative">
+              {displayImg ? (
+                <img 
+                  src={displayImg} 
+                  alt={item.name} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover" 
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    const parent = e.currentTarget.parentElement;
+                    const fallbackEl = parent?.querySelector('.item-no-image');
+                    if (fallbackEl) {
+                      fallbackEl.classList.remove('hidden');
+                    }
+                  }}
+                />
+              ) : null}
+              <div className={`item-no-image text-slate-400 flex items-center justify-center ${displayImg ? 'hidden' : ''}`}>
+                <Package size={18} />
+              </div>
             </div>
             <div>
               <div className="font-extrabold text-xs text-slate-800 leading-snug">
