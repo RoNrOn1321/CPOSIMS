@@ -5,7 +5,7 @@ import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { Badge } from '@/Components/ui/badge';
 import { formatMoney } from '@/lib/formatters';
-import { Link, router, useForm } from '@inertiajs/react';
+import { Link, router, useForm, Head } from '@inertiajs/react';
 import { ArrowLeft, Save, Trash2, AlertCircle } from 'lucide-react';
 import { update as updateProductAction, destroy as destroyProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import ProductImageInput from './Partials/ProductImageInput';
@@ -89,6 +89,7 @@ export default function ProductEdit({ product, categories = [] }: ProductEditPro
 
   return (
     <AdminLayout portal="admin" activeNav="products">
+      <Head title={`Edit ${product.name || 'Product'}`} />
       <div className="flex items-center justify-between pb-2">
         <div className="flex items-center gap-3">
           <Link href={indexProductAction.url()}>

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { Head } from '@inertiajs/react';
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Student, Transaction } from './types';
 import StudentHeader from './Partials/StudentHeader';
@@ -63,6 +64,7 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
         activeNav={activeTab} 
         onNavigate={setActiveTab}
       >
+        <Head title="Parent Portal - No Linked Students" />
         <div className="bg-white rounded-2xl border border-slate-200/90 p-12 text-center shadow-xs max-w-2xl mx-auto my-8">
           <div className="w-16 h-16 rounded-2xl bg-amber-50 text-[#5c1516] flex items-center justify-center mx-auto mb-4 shadow-2xs">
             <Users size={32} />
@@ -85,6 +87,7 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
       onNavigate={setActiveTab}
       onTopUpClick={() => setIsTopUpOpen(true)}
     >
+      <Head title="Parent Portal - Student Balances & Meal History" />
       {/* 1. Student Header Profile & Switcher */}
       <StudentHeader
         students={students}

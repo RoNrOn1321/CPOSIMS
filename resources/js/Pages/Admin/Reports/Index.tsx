@@ -13,7 +13,7 @@ import {
   TableRow 
 } from '@/Components/ui/table';
 import { formatMoney } from '@/lib/formatters';
-import { router } from '@inertiajs/react';
+import { router, Head } from '@inertiajs/react';
 import { index as reportsIndex, exportMethod } from '@/actions/App/Http/Controllers/Admin/ReportController';
 import { 
   BarChart3, 
@@ -216,6 +216,7 @@ export default function ReportsIndex({
 
   return (
     <AdminLayout portal="admin" activeNav="reports">
+      <Head title="Sales & Analytics Reports" />
       {/* ===================== SCREEN VIEW (Hidden in Print) ===================== */}
       <div className="space-y-6 print:hidden">
         {/* Top Header & Actions Bar */}

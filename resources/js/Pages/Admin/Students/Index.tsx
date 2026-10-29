@@ -23,7 +23,7 @@ import {
 import { Checkbox } from '@/Components/ui/checkbox';
 import { Label } from '@/Components/ui/label';
 import ParentCombobox from '@/Components/ParentCombobox';
-import { router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage, Head } from '@inertiajs/react';
 import { 
   index as studentsIndex, 
   store as storeStudent, 
@@ -244,6 +244,7 @@ export default function StudentsIndex({
 
   return (
     <AdminLayout portal="admin" activeNav="students" title="Student & RFID Management">
+      <Head title="Student & RFID Accounts" />
       {/* Flash Success Notification */}
       {flash?.success && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-xs">

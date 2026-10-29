@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/Com
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
-import { Link, useForm } from '@inertiajs/react';
+import { Link, useForm, Head } from '@inertiajs/react';
 import { ArrowLeft, Save, Sparkles, AlertCircle } from 'lucide-react';
 import { store as storeProductAction, index as indexProductAction } from '@/actions/App/Http/Controllers/Admin/ProductController';
 import ProductImageInput from './Partials/ProductImageInput';
@@ -46,6 +46,7 @@ export default function ProductCreate({ categories = [] }: ProductCreateProps) {
 
   return (
     <AdminLayout portal="admin" activeNav="products">
+      <Head title="Add New Product" />
       {/* Top Header with Back Button */}
       <div className="flex items-center justify-between pb-2">
         <div className="flex items-center gap-3">

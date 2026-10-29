@@ -22,7 +22,7 @@ import {
 } from '@/Components/ui/dialog';
 import { Label } from '@/Components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/Components/ui/tabs';
-import { router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage, Head } from '@inertiajs/react';
 import { 
   index as settingsIndex, 
   storeUser, 
@@ -278,6 +278,7 @@ export default function SettingsIndex({
 
   return (
     <AdminLayout portal="admin" activeNav="settings" title="System Settings">
+      <Head title="System Settings & Cashier Management" />
       {/* Flash Success Notification */}
       {flash?.success && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-emerald-800 text-xs font-semibold shadow-xs">

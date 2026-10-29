@@ -20,7 +20,7 @@ import {
   DialogDescription, 
   DialogFooter 
 } from '@/Components/ui/dialog';
-import { router } from '@inertiajs/react';
+import { router, Head } from '@inertiajs/react';
 import { index as auditLogsIndex } from '@/actions/App/Http/Controllers/Admin/AuditLogController';
 import { 
   ShieldCheck, 
@@ -138,6 +138,7 @@ export default function AuditLogsIndex({
 
   return (
     <AdminLayout portal="admin" activeNav="audit">
+      <Head title="Audit Trails & Security Logs" />
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

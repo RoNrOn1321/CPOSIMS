@@ -7,10 +7,10 @@ import { createRoot } from 'react-dom/client';
 import { ConfirmDialogProvider } from '@/Contexts/ConfirmDialogContext';
 import { ToastProvider } from '@/Contexts/ToastContext';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'STC CPOSIMS';
 
 createInertiaApp({
-    title: (title) => `${title} - ${appName}`,
+    title: (title) => (title ? `${title} - ${appName}` : appName),
     resolve: (name) =>
         resolvePageComponent(
             `./Pages/${name}.tsx`,

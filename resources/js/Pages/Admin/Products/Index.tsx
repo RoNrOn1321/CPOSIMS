@@ -21,7 +21,7 @@ import {
   DialogFooter 
 } from '@/Components/ui/dialog';
 import { formatMoney } from '@/lib/formatters';
-import { Link, router } from '@inertiajs/react';
+import { Link, router, Head } from '@inertiajs/react';
 import { 
   Plus, 
   Search, 
@@ -382,6 +382,7 @@ export default function ProductsIndex({
 
   return (
     <AdminLayout portal="admin" activeNav="products">
+      <Head title="Cafeteria Products & Inventory" />
       {/* Top Header & Overview Ribbon */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

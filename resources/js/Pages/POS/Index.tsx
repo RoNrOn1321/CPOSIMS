@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { router } from '@inertiajs/react';
+import { router, Head } from '@inertiajs/react';
 import POSLayout from '@/Layouts/POSLayout';
 import ProductGrid, { Product } from './Partials/ProductGrid';
 import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
@@ -266,6 +266,7 @@ export default function POSIndex({
       onConfigClick={() => setIsDiagnosticsModalOpen(true)}
       cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
     >
+      <Head title="POS Cashier Register" />
       <div className="flex h-full w-full overflow-hidden">
         {/* Product Menu Grid */}
         <div className="flex-1 min-w-0 h-full min-h-0 flex flex-col">
