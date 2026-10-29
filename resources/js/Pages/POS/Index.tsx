@@ -67,33 +67,6 @@ interface POSIndexProps {
   recentTransactions?: RecentTransaction[];
 }
 
-const mockStudents: StudentCustomer[] = [
-  {
-    id: 101,
-    name: 'Juan Dela Cruz',
-    gradeLevel: 'Grade 6 - St. Therese',
-    balance: 450.0,
-    dailyLimit: 120.0,
-    spentToday: 40.0,
-  },
-  {
-    id: 102,
-    name: 'Maria Clara Santos',
-    gradeLevel: 'Grade 10 - St. Francis',
-    balance: 620.0,
-    dailyLimit: 200.0,
-    spentToday: 0.0,
-  },
-  {
-    id: 103,
-    name: 'Brother Mark Loyola',
-    gradeLevel: 'Faculty / Staff',
-    balance: 1200.0,
-    dailyLimit: 500.0,
-    spentToday: 85.0,
-  },
-];
-
 export default function POSIndex({
   products = [],
   categories = [],
@@ -116,8 +89,8 @@ export default function POSIndex({
   const [isVoiding, setIsVoiding] = useState<boolean>(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
 
-  // Customer selector state
-  const [selectedCustomer, setSelectedCustomer] = useState<StudentCustomer | null>(mockStudents[0]);
+  // Customer selector state (defaults to Walk-in Customer)
+  const [selectedCustomer, setSelectedCustomer] = useState<StudentCustomer | null>(null);
   const [studentSearchInput, setStudentSearchInput] = useState<string>('');
   const [isSearchingStudent, setIsSearchingStudent] = useState<boolean>(false);
   const [searchedStudent, setSearchedStudent] = useState<StudentCustomer | null>(null);
@@ -407,6 +380,38 @@ export default function POSIndex({
           )}
 
           <div className="space-y-2.5 my-1 max-h-64 overflow-y-auto">
+            {/* Active Selected Student */}
+            {selectedCustomer && (
+              <div className="p-3 rounded-xl border border-emerald-500 bg-emerald-50/40 flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-slate-800">{selectedCustomer.name}</span>
+                    <Badge className="bg-emerald-600 text-white text-[9px] px-1 py-0">Active</Badge>
+                    {selectedCustomer.gradeLevel && (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-300">
+                        {selectedCustomer.gradeLevel}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Balance: <strong className="text-emerald-700">{formatMoney(selectedCustomer.balance)}</strong>
+                    {selectedCustomer.dailyLimit ? ` • Daily Limit: ${formatMoney(selectedCustomer.dailyLimit)}` : ''}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setIsCustomerModalOpen(false);
+                  }}
+                  className="h-7 text-xs border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg"
+                >
+                  Switch to Walk-in
+                </Button>
+              </div>
+            )}
+
             {/* Walk-in Option */}
             <div
               onClick={() => {
@@ -427,37 +432,6 @@ export default function POSIndex({
                 <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
               )}
             </div>
-
-            {/* Quick Students */}
-            {mockStudents.map(student => (
-              <div
-                key={student.id}
-                onClick={() => {
-                  setSelectedCustomer(student);
-                  setIsCustomerModalOpen(false);
-                }}
-                className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                  selectedCustomer?.id === student.id 
-                    ? 'border-[#5c1516] bg-red-50/50' 
-                    : 'border-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-xs text-slate-800">{student.name}</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-slate-300">
-                      {student.gradeLevel}
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Balance: <strong className="text-emerald-700">{formatMoney(student.balance)}</strong> &bull; Daily Limit: {formatMoney(student.dailyLimit)}
-                  </p>
-                </div>
-                {selectedCustomer?.id === student.id && (
-                  <Badge className="bg-[#5c1516] text-white text-[10px]">Active</Badge>
-                )}
-              </div>
-            ))}
           </div>
         </DialogContent>
       </Dialog>

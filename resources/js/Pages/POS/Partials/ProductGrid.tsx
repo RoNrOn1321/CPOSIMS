@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Utensils, Coffee, Sandwich, Cookie, Apple, Flame, Check } from 'lucide-react';
+import { Plus, Utensils, Coffee, Sandwich, Cookie, Apple, Flame, Check, BookOpen, Tag } from 'lucide-react';
 import { Card } from '@/Components/ui/card';
 import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
@@ -18,151 +18,6 @@ export interface Product {
   barcode?: string | null;
 }
 
-const cafeteriaProducts: Product[] = [
-  {
-    id: 1,
-    name: 'Chicken Adobo Rice Bowl',
-    category: 'Rice Meals',
-    price: 70.0,
-    calories: 450,
-    stock: 24,
-    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 2,
-    name: 'Pork Sinigang with Steamed Rice',
-    category: 'Rice Meals',
-    price: 75.0,
-    calories: 480,
-    stock: 18,
-    image: 'https://images.unsplash.com/photo-1547496502-affa22d38842?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 3,
-    name: 'Beef Tapa with Egg & Garlic Rice',
-    category: 'Rice Meals',
-    price: 85.0,
-    calories: 520,
-    stock: 15,
-    image: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 4,
-    name: 'Sweet Style Spaghetti with Cheese',
-    category: 'Rice Meals',
-    price: 50.0,
-    calories: 380,
-    stock: 30,
-    image: 'https://images.unsplash.com/photo-1621996346565-e3dbc646d9a9?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 5,
-    name: 'Canteen Beef Burger with Cheese',
-    category: 'Snacks & Sandwiches',
-    price: 45.0,
-    calories: 390,
-    stock: 40,
-    image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 6,
-    name: 'Ham & Egg Toasted Sandwich',
-    category: 'Snacks & Sandwiches',
-    price: 35.0,
-    calories: 290,
-    stock: 35,
-    image: 'https://images.unsplash.com/photo-1525351484163-7529414344d8?w=400&q=80',
-  },
-  {
-    id: 7,
-    name: 'Crispy Lumpiang Shanghai (3 pcs)',
-    category: 'Snacks & Sandwiches',
-    price: 30.0,
-    calories: 220,
-    stock: 50,
-    image: 'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?w=400&q=80',
-  },
-  {
-    id: 8,
-    name: 'Fresh Ice-Cold Calamansi Juice',
-    category: 'Beverages',
-    price: 20.0,
-    calories: 90,
-    stock: 60,
-    image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 9,
-    name: 'Chilled Fresh Buko Juice in Bottle',
-    category: 'Beverages',
-    price: 30.0,
-    calories: 110,
-    stock: 25,
-    image: 'https://images.unsplash.com/photo-1544253109-88373249007c?w=400&q=80',
-  },
-  {
-    id: 10,
-    name: 'Dutch Chocolate Milk (250ml)',
-    category: 'Beverages',
-    price: 28.0,
-    calories: 160,
-    stock: 45,
-    image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&q=80',
-  },
-  {
-    id: 11,
-    name: 'Fresh Fruit Cup (Melon & Watermelon)',
-    category: 'Healthy',
-    price: 35.0,
-    calories: 95,
-    stock: 20,
-    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&q=80',
-    isPopular: true,
-  },
-  {
-    id: 12,
-    name: 'Theresian Cheese Ensaymada',
-    category: 'Bakery',
-    price: 25.0,
-    calories: 210,
-    stock: 30,
-    image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400&q=80',
-  },
-  {
-    id: 13,
-    name: 'Warm Banana Bread Slice',
-    category: 'Bakery',
-    price: 25.0,
-    calories: 190,
-    stock: 28,
-    image: 'https://images.unsplash.com/photo-1607958996333-41aef7caefaa?w=400&q=80',
-  },
-  {
-    id: 14,
-    name: 'Purified Water (500ml)',
-    category: 'Beverages',
-    price: 15.0,
-    calories: 0,
-    stock: 120,
-    image: 'https://images.unsplash.com/photo-1523362628745-0c100150b504?w=400&q=80',
-  },
-];
-
-const defaultCategories = [
-  { id: 'All', label: 'All Items', icon: <Utensils size={14} /> },
-  { id: 'Rice Meals', label: 'Rice Meals', icon: <Flame size={14} /> },
-  { id: 'Snacks & Sandwiches', label: 'Snacks & Bites', icon: <Sandwich size={14} /> },
-  { id: 'Beverages', label: 'Drinks & Juices', icon: <Coffee size={14} /> },
-  { id: 'Bakery', label: 'Bakery & Sweets', icon: <Cookie size={14} /> },
-  { id: 'Healthy', label: 'Fruit & Healthy', icon: <Apple size={14} /> },
-];
-
 interface ProductGridProps {
   onAddToCart: (product: Product) => void;
   searchQuery?: string;
@@ -171,32 +26,56 @@ interface ProductGridProps {
   categories?: string[];
 }
 
+const getCategoryIcon = (name: string) => {
+  const lower = name.toLowerCase();
+  if (lower.includes('beverage') || lower.includes('drink') || lower.includes('juice') || lower.includes('water')) {
+    return <Coffee size={14} />;
+  }
+  if (lower.includes('snack') || lower.includes('sandwich') || lower.includes('burger')) {
+    return <Sandwich size={14} />;
+  }
+  if (lower.includes('bakery') || lower.includes('bread') || lower.includes('sweet') || lower.includes('cookie')) {
+    return <Cookie size={14} />;
+  }
+  if (lower.includes('fruit') || lower.includes('healthy') || lower.includes('salad')) {
+    return <Apple size={14} />;
+  }
+  if (lower.includes('supply') || lower.includes('supplies') || lower.includes('school') || lower.includes('stationery')) {
+    return <BookOpen size={14} />;
+  }
+  if (lower.includes('rice') || lower.includes('meal') || lower.includes('hot') || lower.includes('dish')) {
+    return <Flame size={14} />;
+  }
+  return <Tag size={14} />;
+};
+
 export default function ProductGrid({ 
   onAddToCart, 
   searchQuery = '',
   cartItemIds = new Set(),
-  products,
-  categories: categoriesProp,
+  products = [],
+  categories: categoriesProp = [],
 }: ProductGridProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
   const activeProducts = useMemo(() => {
-    return products && products.length > 0 ? products : cafeteriaProducts;
+    return products ?? [];
   }, [products]);
 
   const activeCategories = useMemo(() => {
-    if (categoriesProp && categoriesProp.length > 0) {
-      return [
-        { id: 'All', label: 'All Items', icon: <Utensils size={14} /> },
-        ...categoriesProp.map(cat => ({
-          id: cat,
-          label: cat,
-          icon: <Flame size={14} />,
-        })),
-      ];
-    }
-    return defaultCategories;
-  }, [categoriesProp]);
+    const list = categoriesProp && categoriesProp.length > 0
+      ? categoriesProp
+      : Array.from(new Set(activeProducts.map(p => p.category).filter(Boolean)));
+
+    return [
+      { id: 'All', label: 'All Items', icon: <Utensils size={14} /> },
+      ...list.map(cat => ({
+        id: cat,
+        label: cat,
+        icon: getCategoryIcon(cat),
+      })),
+    ];
+  }, [categoriesProp, activeProducts]);
 
   const filteredProducts = useMemo(() => {
     return activeProducts.filter(item => {
@@ -242,9 +121,13 @@ export default function ProductGrid({
               <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3">
                 <Utensils size={28} />
               </div>
-              <h3 className="font-bold text-slate-700 text-base">No items match your search</h3>
+              <h3 className="font-bold text-slate-700 text-base">
+                {activeProducts.length === 0 ? 'No products in database' : 'No items match your search'}
+              </h3>
               <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                Try adjusting your search query or selecting a different category.
+                {activeProducts.length === 0
+                  ? 'There are currently no active products in the database. Please add or activate products in the Admin catalog.'
+                  : 'Try adjusting your search query or selecting a different category.'}
               </p>
             </div>
           ) : (
