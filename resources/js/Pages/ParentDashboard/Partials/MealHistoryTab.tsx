@@ -4,19 +4,23 @@ import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
-import { Receipt } from 'lucide-react';
-import { Transaction } from '../types';
+import { Receipt, FileText, Loader2 } from 'lucide-react';
+import { Student, Transaction } from '../types';
+import { exportMealHistoryPdf } from '../utils/exportMealHistoryPdf';
 
 interface MealHistoryTabProps {
+  student: Student;
   transactions: Transaction[];
   onViewReceipt: (txn: Transaction) => void;
 }
 
 export default function MealHistoryTab({
+  student,
   transactions,
   onViewReceipt,
 }: MealHistoryTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const filteredTransactions = transactions.filter(txn => {
     const term = searchTerm.toLowerCase();
@@ -25,6 +29,16 @@ export default function MealHistoryTab({
     const matchItems = txn.items.some(i => i.name.toLowerCase().includes(term));
     return matchMeal || matchId || matchItems;
   });
+
+  const handleExportPdf = () => {
+    setIsExporting(true);
+    try {
+      const listToExport = filteredTransactions.length > 0 ? filteredTransactions : transactions;
+      exportMealHistoryPdf(student, listToExport, searchTerm.trim());
+    } finally {
+      setTimeout(() => setIsExporting(false), 1200);
+    }
+  };
 
   return (
     <Card className="rounded-2xl border-slate-200/90 shadow-xs bg-white">
@@ -48,10 +62,22 @@ export default function MealHistoryTab({
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => alert('Exporting monthly meal summary PDF...')}
-              className="h-9 text-xs font-bold rounded-xl border-slate-200"
+              onClick={handleExportPdf}
+              disabled={isExporting || transactions.length === 0}
+              className="h-9 text-xs font-bold rounded-xl border-slate-200 flex items-center gap-1.5 cursor-pointer hover:bg-slate-50 transition-colors"
+              title="Export or print official meal history statement as PDF"
             >
-              Export PDF
+              {isExporting ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-[#5c1516]" />
+                  <span>Preparing...</span>
+                </>
+              ) : (
+                <>
+                  <FileText size={13} className="text-[#5c1516]" />
+                  <span>Export PDF</span>
+                </>
+              )}
             </Button>
           </div>
         </div>

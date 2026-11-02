@@ -130,6 +130,7 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
         {/* Tab 2: Meal History */}
         {activeTab === 'history' && (
           <MealHistoryTab
+            student={currentStudent}
             transactions={studentTransactions}
             onViewReceipt={setSelectedReceipt}
           />
