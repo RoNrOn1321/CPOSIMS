@@ -23,6 +23,12 @@ interface TopUpModalProps {
   onConfirmTopUp?: (amount: number) => void;
 }
 
+interface TopUpResult {
+  amount: number;
+  newBalance: number;
+  referenceNumber: string;
+}
+
 export default function TopUpModal({
   isOpen,
   onClose,
@@ -37,9 +43,9 @@ export default function TopUpModal({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
-  const [referenceNumber, setReferenceNumber] = useState<string>('');
+  const [successData, setSuccessData] = useState<TopUpResult | null>(null);
 
-  // Synchronize state when modal opens
+  // Synchronize state when modal opens or when student account changes
   useEffect(() => {
     if (isOpen) {
       setAmount(200);
@@ -50,9 +56,9 @@ export default function TopUpModal({
       setIsSubmitting(false);
       setErrorMessage(null);
       setIsSuccess(false);
-      setReferenceNumber('');
+      setSuccessData(null);
     }
-  }, [isOpen, student]);
+  }, [isOpen, student.id]);
 
   // Adjust default simulated account number based on payment method
   const handlePaymentMethodChange = (method: 'gcash' | 'maya' | 'bank') => {
@@ -88,13 +94,16 @@ export default function TopUpModal({
       return;
     }
 
+    const reloadAmount = activeAmount;
+    const initialBalance = student.balance;
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
     router.post(
       topupStudent.url(student.id),
       {
-        amount: activeAmount,
+        amount: reloadAmount,
         payment_method: paymentMethod,
         account_number: accountNumber.trim(),
       },
@@ -102,13 +111,21 @@ export default function TopUpModal({
         preserveScroll: true,
         onSuccess: (page) => {
           setIsSubmitting(false);
+          const flash = (page.props as any)?.flash;
+          const flashTopup = flash?.topup;
+          const flashRef = flashTopup?.reference_number || flash?.reference_number || '';
+          const confirmedAmount = Number(flashTopup?.amount ?? reloadAmount);
+          const confirmedBalance = Number(flashTopup?.new_balance ?? (initialBalance + reloadAmount));
+
+          setSuccessData({
+            amount: confirmedAmount,
+            newBalance: confirmedBalance,
+            referenceNumber: flashRef,
+          });
           setIsSuccess(true);
-          const flashRef = (page.props as any)?.flash?.reference_number;
-          if (flashRef) {
-            setReferenceNumber(flashRef);
-          }
+
           if (onConfirmTopUp) {
-            onConfirmTopUp(activeAmount);
+            onConfirmTopUp(confirmedAmount);
           }
         },
         onError: (errors) => {
@@ -132,7 +149,7 @@ export default function TopUpModal({
               Top-Up {student.name}'s RFID Card
             </DialogTitle>
             <DialogDescription className="text-amber-100/80 text-xs">
-              Card: {student.rfidUid} &bull; Current: {formatMoney(student.balance)}
+              Card: {student.rfidUid} &bull; Current: {formatMoney(isSuccess && successData ? successData.newBalance : student.balance)}
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -145,24 +162,24 @@ export default function TopUpModal({
             </div>
           )}
 
-          {isSuccess ? (
+          {isSuccess && successData ? (
             <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">
               <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center animate-bounce">
                 <CheckCircle2 size={36} />
               </div>
               <h4 className="font-extrabold text-slate-800 text-lg">Top-Up Successful!</h4>
-              {referenceNumber && (
+              {successData.referenceNumber && (
                 <div className="px-3 py-1 bg-slate-100 rounded-lg text-slate-700 font-mono text-xs font-semibold">
-                  Ref: {referenceNumber}
+                  Ref: {successData.referenceNumber}
                 </div>
               )}
               <p className="text-xs text-slate-500">
-                Added <strong className="text-slate-800">{formatMoney(activeAmount)}</strong> to {student.name}'s card.
+                Added <strong className="text-slate-800">{formatMoney(successData.amount)}</strong> to {student.name}'s card.
               </p>
               <div className="w-full mt-2 p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
                 <span className="text-slate-500 font-medium">New Persisted Balance:</span>
                 <span className="font-black text-[#5c1516] text-base">
-                  {formatMoney(student.balance + activeAmount)}
+                  {formatMoney(successData.newBalance)}
                 </span>
               </div>
             </div>

@@ -70,21 +70,34 @@ class BalanceTopupController extends Controller
                 'reference_number' => $referenceNumber,
             ]);
 
+            $studentName = trim("{$lockedStudent->first_name} {$lockedStudent->last_name}");
+            $topupPayload = [
+                'reference_number' => $referenceNumber,
+                'student_name' => $studentName,
+                'student_id_number' => $lockedStudent->student_id_number,
+                'amount' => $amount,
+                'previous_balance' => $previousBalance,
+                'new_balance' => $newBalance,
+                'created_at' => now()->format('Y-m-d H:i:s'),
+                'payment_method' => $validated['payment_method'],
+            ];
+
             if ($request->wantsJson() && ! $request->header('X-Inertia')) {
                 return response()->json([
                     'message' => 'RFID balance reloaded successfully.',
                     'reference_number' => $referenceNumber,
-                    'student_name' => trim("{$lockedStudent->first_name} {$lockedStudent->last_name}"),
+                    'student_name' => $studentName,
                     'amount' => $amount,
                     'previous_balance' => $previousBalance,
                     'new_balance' => $newBalance,
-                    'topup' => $topup,
+                    'topup' => $topupPayload,
                 ], 200);
             }
 
             return redirect()->back()->with([
                 'success' => 'RFID balance reloaded successfully.',
                 'reference_number' => $referenceNumber,
+                'topup' => $topupPayload,
             ]);
         });
     }

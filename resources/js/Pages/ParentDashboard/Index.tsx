@@ -49,13 +49,6 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
     return studentTransactions.find(t => t.dateTime.toLowerCase().includes('today')) || studentTransactions[0] || null;
   }, [studentTransactions]);
 
-  // Handle local optimistic balance top-up display
-  const handleTopUpConfirm = (amount: number) => {
-    if (currentStudent) {
-      currentStudent.balance += amount;
-    }
-  };
-
   // Graceful empty state when parent has no linked student accounts
   if (!currentStudent || students.length === 0) {
     return (
@@ -155,7 +148,6 @@ export default function ParentDashboardIndex({ students = [] }: ParentDashboardP
         isOpen={isTopUpOpen}
         onClose={() => setIsTopUpOpen(false)}
         student={currentStudent}
-        onConfirmTopUp={handleTopUpConfirm}
       />
 
       <EReceiptModal

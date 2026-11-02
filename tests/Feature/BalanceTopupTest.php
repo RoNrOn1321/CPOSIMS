@@ -28,6 +28,12 @@ it('allows a parent to reload their linked child via simulated e-wallet and reco
     $response->assertRedirect();
     $response->assertSessionHas('success', 'RFID balance reloaded successfully.');
     $response->assertSessionHas('reference_number');
+    $response->assertSessionHas('topup', function (array $topup) {
+        return (float) $topup['amount'] === 300.00
+            && (float) $topup['previous_balance'] === 200.00
+            && (float) $topup['new_balance'] === 500.00
+            && $topup['student_name'] === 'Juan Dela Cruz';
+    });
 
     expect((float) $child->fresh()->current_balance)->toBe(500.00);
 
