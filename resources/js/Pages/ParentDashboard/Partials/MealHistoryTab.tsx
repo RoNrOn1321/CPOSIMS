@@ -4,9 +4,9 @@ import { Badge } from '@/Components/ui/badge';
 import { Button } from '@/Components/ui/button';
 import { Input } from '@/Components/ui/input';
 import { formatMoney } from '@/lib/formatters';
-import { Receipt, FileText, Loader2 } from 'lucide-react';
+import { Receipt, Download, Loader2 } from 'lucide-react';
 import { Student, Transaction } from '../types';
-import { exportMealHistoryPdf } from '../utils/exportMealHistoryPdf';
+import { downloadMealHistoryPdf } from '../utils/exportMealHistoryPdf';
 
 interface MealHistoryTabProps {
   student: Student;
@@ -30,13 +30,13 @@ export default function MealHistoryTab({
     return matchMeal || matchId || matchItems;
   });
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     setIsExporting(true);
     try {
       const listToExport = filteredTransactions.length > 0 ? filteredTransactions : transactions;
-      exportMealHistoryPdf(student, listToExport, searchTerm.trim());
+      await downloadMealHistoryPdf(student, listToExport, searchTerm.trim());
     } finally {
-      setTimeout(() => setIsExporting(false), 1200);
+      setIsExporting(false);
     }
   };
 
@@ -65,17 +65,17 @@ export default function MealHistoryTab({
               onClick={handleExportPdf}
               disabled={isExporting || transactions.length === 0}
               className="h-9 text-xs font-bold rounded-xl border-slate-200 flex items-center gap-1.5 cursor-pointer hover:bg-slate-50 transition-colors"
-              title="Export or print official meal history statement as PDF"
+              title="Download official meal history statement as a PDF soft copy"
             >
               {isExporting ? (
                 <>
                   <Loader2 size={13} className="animate-spin text-[#5c1516]" />
-                  <span>Preparing...</span>
+                  <span>Downloading...</span>
                 </>
               ) : (
                 <>
-                  <FileText size={13} className="text-[#5c1516]" />
-                  <span>Export PDF</span>
+                  <Download size={13} className="text-[#5c1516]" />
+                  <span>Download PDF</span>
                 </>
               )}
             </Button>
