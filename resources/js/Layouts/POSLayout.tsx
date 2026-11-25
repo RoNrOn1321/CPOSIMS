@@ -24,6 +24,8 @@ interface POSLayoutProps {
   children: React.ReactNode;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
+  onSearchSubmit?: (query: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement>;
   activeCategory?: string;
   onSelectCategory?: (category: string) => void;
   cartCount?: number;
@@ -40,6 +42,8 @@ export default function POSLayout({
   children,
   searchQuery = '',
   onSearchChange,
+  onSearchSubmit,
+  searchInputRef,
   cartCount = 0,
   heldOrdersCount = 0,
   onHoldOrdersClick,
@@ -132,19 +136,32 @@ export default function POSLayout({
 
           {/* Center Search Bar with modern glassmorphism */}
           <div className="flex-1 max-w-md mx-8">
-            <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 h-4 w-4" />
-              <Input 
-                type="text" 
-                placeholder="Search food, beverage, or scan barcode (F2)..." 
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSearchSubmit?.(searchQuery);
+              }}
+              className="relative"
+            >
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 h-4 w-4 pointer-events-none" />
+              <Input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search food, beverage, or scan barcode (F2)..."
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
-                className="w-full bg-white/10 hover:bg-white/15 focus:bg-white focus:text-slate-900 text-white placeholder:text-zinc-300 pl-10 pr-12 h-11 rounded-xl border border-white/20 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:border-transparent transition-all shadow-inner text-sm" 
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && searchQuery) {
+                    e.preventDefault();
+                    onSearchChange?.('');
+                  }
+                }}
+                className="w-full bg-white/10 hover:bg-white/15 focus:bg-white focus:text-slate-900 text-white placeholder:text-zinc-300 pl-10 pr-12 h-11 rounded-xl border border-white/20 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:border-transparent transition-all shadow-inner text-sm"
               />
-              <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-white/20 text-white/90 px-1.5 py-0.5 rounded font-mono">
+              <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-white/20 text-white/90 px-1.5 py-0.5 rounded font-mono pointer-events-none">
                 F2
               </kbd>
-            </div>
+            </form>
           </div>
 
           {/* Right Status & Cashier Info with Logout Button */}

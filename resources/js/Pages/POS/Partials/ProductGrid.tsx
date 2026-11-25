@@ -78,10 +78,14 @@ export default function ProductGrid({
   }, [categoriesProp, activeProducts]);
 
   const filteredProducts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
     return activeProducts.filter(item => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            item.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.category.toLowerCase().includes(query) ||
+        (item.barcode ? item.barcode.toLowerCase().includes(query) : false);
       return matchesCategory && matchesSearch;
     });
   }, [activeProducts, selectedCategory, searchQuery]);
@@ -134,11 +138,16 @@ export default function ProductGrid({
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-12">
               {filteredProducts.map((product) => {
                 const inCart = cartItemIds.has(product.id);
+                const isOutOfStock = product.stock <= 0;
                 return (
                   <Card 
                     key={product.id}
                     onClick={() => onAddToCart(product)}
-                    className="group relative flex flex-col overflow-hidden bg-white border border-slate-200/80 hover:border-[#5c1516]/40 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 rounded-2xl cursor-pointer"
+                    className={`group relative flex flex-col overflow-hidden bg-white border border-slate-200/80 transition-all duration-300 rounded-2xl ${
+                      isOutOfStock
+                        ? 'opacity-70 cursor-not-allowed border-slate-200'
+                        : 'hover:border-[#5c1516]/40 hover:shadow-xl hover:-translate-y-1 cursor-pointer'
+                    }`}
                   >
                     {/* Product Image / Visual Header */}
                     <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100 flex items-center justify-center">
@@ -191,11 +200,13 @@ export default function ProductGrid({
                           </span>
                         )}
                         <span className={`text-[11px] font-bold drop-shadow-sm ml-auto ${
-                          product.image 
-                            ? (product.stock <= 5 ? 'text-amber-300' : 'text-emerald-300')
-                            : (product.stock <= 5 ? 'text-amber-700' : 'text-emerald-700')
+                          isOutOfStock
+                            ? 'text-red-500 bg-white/90 px-1.5 py-0.5 rounded'
+                            : product.image 
+                              ? (product.stock <= 5 ? 'text-amber-300' : 'text-emerald-300')
+                              : (product.stock <= 5 ? 'text-amber-700' : 'text-emerald-700')
                         }`}>
-                          {product.stock} available
+                          {isOutOfStock ? 'Out of stock' : `${product.stock} available`}
                         </span>
                       </div>
                     </div>
@@ -206,6 +217,11 @@ export default function ProductGrid({
                         <h4 className="font-bold text-slate-800 text-sm leading-tight group-hover:text-[#5c1516] transition-colors line-clamp-2">
                           {product.name}
                         </h4>
+                        {product.barcode && (
+                          <span className="inline-block mt-1 font-mono text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {product.barcode}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between pt-1 border-t border-slate-100">
@@ -218,10 +234,13 @@ export default function ProductGrid({
 
                         <Button
                           size="sm"
+                          disabled={isOutOfStock}
                           className={`h-9 w-9 p-0 rounded-xl shadow-xs transition-all ${
-                            inCart 
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
-                              : 'bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold'
+                            isOutOfStock
+                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                              : inCart 
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                                : 'bg-amber-400 hover:bg-amber-500 text-amber-950 font-bold'
                           }`}
                         >
                           {inCart ? <Check size={16} /> : <Plus size={16} />}

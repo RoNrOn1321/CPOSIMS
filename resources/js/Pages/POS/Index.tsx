@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { router, Head } from '@inertiajs/react';
 import POSLayout from '@/Layouts/POSLayout';
 import ProductGrid, { Product } from './Partials/ProductGrid';
-import ActiveCart, { CartItem, StudentCustomer } from './Partials/ActiveCart';
+import ActiveCart, { CartItem, StudentCustomer, ScanFeedback } from './Partials/ActiveCart';
 import CheckoutModal from './Partials/CheckoutModal';
 import PosTopUpModal from './Partials/PosTopUpModal';
 import PosHardwareDiagnosticsModal from './Partials/PosHardwareDiagnosticsModal';
@@ -98,6 +98,24 @@ export default function POSIndex({
 
   const [discountPercentage, setDiscountPercentage] = useState<number>(0);
   const [heldOrders, setHeldOrders] = useState<{ id: string; items: CartItem[]; customer: StudentCustomer | null; time: string }[]>([]);
+  const [lastScanFeedback, setLastScanFeedback] = useState<ScanFeedback | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const studentSearchInputRef = useRef<HTMLInputElement>(null);
+  const cartItemsRef = useRef<CartItem[]>(cartItems);
+  cartItemsRef.current = cartItems;
+
+  const isAnyModalOpen =
+    isCheckoutModalOpen ||
+    isCustomerModalOpen ||
+    isHeldOrdersModalOpen ||
+    isReloadModalOpen ||
+    isOrdersModalOpen ||
+    isDiagnosticsModalOpen ||
+    isStockModalOpen ||
+    Boolean(transactionToVoid) ||
+    Boolean(transactionToPrint);
 
   // Synchronize recent transactions when incoming props update
   useEffect(() => {
@@ -106,35 +124,207 @@ export default function POSIndex({
     }
   }, [initialTransactions]);
 
-  // Item additions & quantities
-  const handleAddToCart = (product: Product) => {
-    setCartItems(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
-      if (existing) {
-        return prev.map(item => 
-          item.product.id === product.id 
-            ? { ...item, quantity: item.quantity + 1 } 
+  // Auto-clear inline barcode scan feedback after 4.5 seconds
+  useEffect(() => {
+    if (!lastScanFeedback) return;
+    const timer = setTimeout(() => {
+      setLastScanFeedback(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [lastScanFeedback]);
+
+  // Autofocus student RFID / ID lookup input when selector modal opens
+  useEffect(() => {
+    if (isCustomerModalOpen) {
+      const timer = setTimeout(() => {
+        studentSearchInputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isCustomerModalOpen]);
+
+  // Item additions & quantities with stock validation
+  const tryAddProductToCart = useCallback((product: Product): { ok: boolean; reason?: 'out_of_stock' | 'max_stock' } => {
+    if (product.stock <= 0) {
+      toast.error(`${product.name} is currently out of stock.`);
+      return { ok: false, reason: 'out_of_stock' };
+    }
+
+    const currentItems = cartItemsRef.current;
+    const existing = currentItems.find(item => item.product.id === product.id);
+    if (existing && existing.quantity >= product.stock) {
+      toast.warning(`Maximum available stock (${product.stock}) reached for ${product.name}.`);
+      return { ok: false, reason: 'max_stock' };
+    }
+
+    const nextItems = existing
+      ? currentItems.map(item =>
+          item.product.id === product.id
+            ? { ...item, product, quantity: item.quantity + 1 }
             : item
-        );
-      }
-      return [...prev, { product, quantity: 1 }];
-    });
+        )
+      : [...currentItems, { product, quantity: 1 }];
+
+    cartItemsRef.current = nextItems;
+    setCartItems(nextItems);
+    return { ok: true };
+  }, []);
+
+  const handleAddToCart = useCallback((product: Product) => {
+    tryAddProductToCart(product);
+  }, [tryAddProductToCart]);
+
+  const handleBarcodeScan = useCallback((rawCode: string): { ok: boolean; message?: string } => {
+    const code = rawCode.trim();
+    if (!code) {
+      return { ok: false };
+    }
+
+    const normalized = code.toLowerCase();
+    const matchedProduct = products.find(
+      (p) => p.barcode && p.barcode.trim().toLowerCase() === normalized
+    );
+
+    if (!matchedProduct) {
+      const message = `No active product found for barcode "${code}".`;
+      setLastScanFeedback({ status: 'error', message, timestamp: Date.now() });
+      toast.error(message);
+      return { ok: false, message };
+    }
+
+    const addResult = tryAddProductToCart(matchedProduct);
+    if (!addResult.ok) {
+      const message =
+        addResult.reason === 'out_of_stock'
+          ? `${matchedProduct.name} is out of stock.`
+          : `Only ${matchedProduct.stock} in stock for ${matchedProduct.name}.`;
+      setLastScanFeedback({ status: 'error', message, timestamp: Date.now() });
+      return { ok: false, message };
+    }
+
+    const buyerLabel = selectedCustomer ? selectedCustomer.name : 'Walk-in Customer';
+    const message = `Added ${matchedProduct.name} (${formatMoney(matchedProduct.price)}) to ${buyerLabel}`;
+    setLastScanFeedback({ status: 'success', message, timestamp: Date.now() });
+    toast.success(`Scanned ${matchedProduct.name} → ${buyerLabel}`);
+    return { ok: true, message };
+  }, [products, selectedCustomer, tryAddProductToCart]);
+
+  const handleSearchSubmit = useCallback((rawQuery: string) => {
+    const trimmed = rawQuery.trim();
+    if (!trimmed) return;
+
+    const normalized = trimmed.toLowerCase();
+    const exactBarcodeMatch = products.find(
+      (p) => p.barcode && p.barcode.trim().toLowerCase() === normalized
+    );
+
+    if (exactBarcodeMatch) {
+      handleBarcodeScan(trimmed);
+      setSearchQuery('');
+      return;
+    }
+
+    const hasTextMatches = products.some(
+      (item) =>
+        item.name.toLowerCase().includes(normalized) ||
+        item.category.toLowerCase().includes(normalized) ||
+        (item.barcode ? item.barcode.toLowerCase().includes(normalized) : false)
+    );
+
+    if (!hasTextMatches) {
+      handleBarcodeScan(trimmed);
+      setSearchQuery('');
+    }
+  }, [products, handleBarcodeScan]);
+
+  const onGlobalBarcodeScanRef = useRef<(code: string) => void>(() => {});
+  onGlobalBarcodeScanRef.current = (code: string) => {
+    handleBarcodeScan(code);
   };
 
+  // Global USB HID Barcode Scanner Listener + F2 Search Shortcut on POS Register
+  useEffect(() => {
+    if (isAnyModalOpen) return;
+
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (['Shift', 'Control', 'Alt', 'Meta', 'Tab', 'CapsLock', 'Escape'].includes(e.key)) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastKeyTime > 150) {
+        buffer = '';
+      }
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        const scanned = buffer.trim();
+        if (scanned.length >= 2) {
+          e.preventDefault();
+          e.stopPropagation();
+          buffer = '';
+          onGlobalBarcodeScanRef.current(scanned);
+        } else {
+          buffer = '';
+        }
+        return;
+      }
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAnyModalOpen]);
+
   const handleUpdateQuantity = (productId: number, quantity: number) => {
-    setCartItems(prev => 
-      prev.map(item => 
-        item.product.id === productId ? { ...item, quantity } : item
-      )
+    const catalogProduct = products.find(p => p.id === productId);
+    const maxStock = catalogProduct?.stock;
+
+    let nextQty = Math.max(1, quantity);
+    if (maxStock !== undefined && nextQty > maxStock) {
+      nextQty = Math.max(1, maxStock);
+      toast.warning(`Maximum available stock (${maxStock}) reached for ${catalogProduct?.name ?? 'this item'}.`);
+    }
+
+    const nextItems = cartItemsRef.current.map(item =>
+      item.product.id === productId ? { ...item, quantity: nextQty } : item
     );
+    cartItemsRef.current = nextItems;
+    setCartItems(nextItems);
   };
 
   const handleRemoveItem = (productId: number) => {
-    setCartItems(prev => prev.filter(item => item.product.id !== productId));
+    const nextItems = cartItemsRef.current.filter(item => item.product.id !== productId);
+    cartItemsRef.current = nextItems;
+    setCartItems(nextItems);
   };
 
   const handleClearCart = () => {
     if (cartItems.length > 0) {
+      cartItemsRef.current = [];
       setCartItems([]);
       toast.info('Current cart items cleared.');
     }
@@ -150,6 +340,7 @@ export default function POSIndex({
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setHeldOrders(prev => [newHold, ...prev]);
+    cartItemsRef.current = [];
     setCartItems([]);
     toast.info(`Order ${newHold.id} put on hold.`);
   };
@@ -157,6 +348,7 @@ export default function POSIndex({
   const handleRecallOrder = (holdId: string) => {
     const held = heldOrders.find(h => h.id === holdId);
     if (held) {
+      cartItemsRef.current = held.items;
       setCartItems(held.items);
       setSelectedCustomer(held.customer);
       setHeldOrders(prev => prev.filter(h => h.id !== holdId));
@@ -190,6 +382,8 @@ export default function POSIndex({
           balance: student.current_balance,
           dailyLimit: student.daily_spending_limit,
           spentToday: student.spent_today,
+          isSpendingLimited: student.is_spending_limited,
+          remainingDailyLimit: student.remaining_daily_limit,
           rfidUid: student.rfid_uid,
           studentId: student.student_id_number,
           status: student.status,
@@ -257,6 +451,8 @@ export default function POSIndex({
     <POSLayout
       searchQuery={searchQuery}
       onSearchChange={setSearchQuery}
+      onSearchSubmit={handleSearchSubmit}
+      searchInputRef={searchInputRef}
       heldOrdersCount={heldOrders.length}
       onHoldOrdersClick={() => setIsHeldOrdersModalOpen(true)}
       onReloadClick={() => setIsReloadModalOpen(true)}
@@ -292,6 +488,9 @@ export default function POSIndex({
             onSelectCustomerClick={() => setIsCustomerModalOpen(true)}
             discountPercentage={discountPercentage}
             onApplyDiscount={handleApplyDiscount}
+            onBarcodeScan={handleBarcodeScan}
+            lastScanFeedback={lastScanFeedback}
+            barcodeInputRef={barcodeInputRef}
           />
         </div>
       </div>
@@ -303,8 +502,22 @@ export default function POSIndex({
         totalAmount={totalPayable}
         selectedCustomer={selectedCustomer}
         cartItems={cartItems}
-        onSuccess={() => {
+        onSuccess={(receipt) => {
+          cartItemsRef.current = [];
           setCartItems([]);
+          setLastScanFeedback(null);
+          if (receipt?.student && selectedCustomer && receipt.student.id === selectedCustomer.id) {
+            const newSpent = selectedCustomer.spentToday + Number(receipt.total_amount ?? 0);
+            setSelectedCustomer({
+              ...selectedCustomer,
+              balance: Number(receipt.student.remaining_balance ?? selectedCustomer.balance),
+              spentToday: newSpent,
+              remainingDailyLimit:
+                selectedCustomer.isSpendingLimited !== false
+                  ? Math.max(0, selectedCustomer.dailyLimit - newSpent)
+                  : selectedCustomer.remainingDailyLimit,
+            });
+          }
           toast.success('Sale checkout completed successfully!');
           router.reload({ only: ['products', 'recentTransactions'] });
         }}
@@ -328,6 +541,7 @@ export default function POSIndex({
             <div className="relative flex-1">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
+                ref={studentSearchInputRef}
                 type="text"
                 placeholder="Lookup by Student ID or scan RFID..."
                 value={studentSearchInput}
@@ -681,8 +895,10 @@ export default function POSIndex({
         products={products}
         categories={categories}
         onAddToCart={(product) => {
-          handleAddToCart(product);
-          toast.success(`Added ${product.name} to cart.`);
+          const result = tryAddProductToCart(product);
+          if (result.ok) {
+            toast.success(`Added ${product.name} to cart.`);
+          }
         }}
       />
     </POSLayout>

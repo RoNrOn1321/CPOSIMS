@@ -93,7 +93,10 @@ export default function CheckoutModal({
       setSuccessReceipt(null);
       setIsSubmitting(false);
       if (selectedCustomer?.rfidUid) {
+        setPaymentMethod('rfid');
         setRfidUid(selectedCustomer.rfidUid);
+      } else {
+        setPaymentMethod('cash');
       }
     } else if (!isOpen) {
       setRfidUid('');

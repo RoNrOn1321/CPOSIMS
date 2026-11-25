@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Trash2, 
   Plus, 
@@ -11,10 +11,14 @@ import {
   AlertTriangle,
   Receipt,
   CreditCard,
-  Sparkles
+  Sparkles,
+  Barcode,
+  CheckCircle2,
+  ShieldAlert
 } from 'lucide-react';
 import { Button } from '@/Components/ui/button';
 import { Badge } from '@/Components/ui/badge';
+import { Input } from '@/Components/ui/input';
 import { ScrollArea } from '@/Components/ui/scroll-area';
 import { formatMoney } from '@/lib/formatters';
 
@@ -25,6 +29,8 @@ export interface CartItem {
     price: number;
     image?: string | null;
     category?: string;
+    stock?: number;
+    barcode?: string | null;
   };
   quantity: number;
 }
@@ -36,9 +42,17 @@ export interface StudentCustomer {
   balance: number;
   dailyLimit: number;
   spentToday: number;
+  isSpendingLimited?: boolean;
+  remainingDailyLimit?: number | null;
   rfidUid?: string;
   studentId?: string;
   status?: string;
+}
+
+export interface ScanFeedback {
+  status: 'success' | 'error';
+  message: string;
+  timestamp: number;
 }
 
 interface ActiveCartProps {
@@ -52,6 +66,9 @@ interface ActiveCartProps {
   onSelectCustomerClick: () => void;
   discountPercentage?: number;
   onApplyDiscount?: () => void;
+  onBarcodeScan?: (barcode: string) => { ok: boolean; message?: string } | void;
+  lastScanFeedback?: ScanFeedback | null;
+  barcodeInputRef?: React.RefObject<HTMLInputElement>;
 }
 
 export default function ActiveCart({
@@ -65,17 +82,38 @@ export default function ActiveCart({
   onSelectCustomerClick,
   discountPercentage = 0,
   onApplyDiscount,
+  onBarcodeScan,
+  lastScanFeedback,
+  barcodeInputRef,
 }: ActiveCartProps) {
+  const [barcodeInput, setBarcodeInput] = useState<string>('');
+
   const subtotal = items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
   const discountAmount = (subtotal * discountPercentage) / 100;
   const total = Math.max(0, subtotal - discountAmount);
   const totalItemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
-  // Check pupil daily limit
-  const remainingDailyLimit = selectedCustomer 
-    ? Math.max(0, selectedCustomer.dailyLimit - selectedCustomer.spentToday) 
+  // Check pupil daily limit & balance
+  const isSpendingLimited = selectedCustomer ? selectedCustomer.isSpendingLimited !== false : false;
+  const remainingDailyLimit = selectedCustomer && isSpendingLimited
+    ? (selectedCustomer.remainingDailyLimit !== undefined && selectedCustomer.remainingDailyLimit !== null
+        ? selectedCustomer.remainingDailyLimit
+        : Math.max(0, selectedCustomer.dailyLimit - selectedCustomer.spentToday))
     : Infinity;
-  const isLimitExceeded = selectedCustomer ? total > remainingDailyLimit : false;
+  const isLimitExceeded = Boolean(selectedCustomer && isSpendingLimited && total > remainingDailyLimit);
+  const isBalanceInsufficient = Boolean(selectedCustomer && total > selectedCustomer.balance);
+  const isCardBlocked = Boolean(
+    selectedCustomer?.status && ['lost_card', 'suspended', 'inactive'].includes(selectedCustomer.status)
+  );
+
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = barcodeInput.trim();
+    if (!trimmed || !onBarcodeScan) return;
+    onBarcodeScan(trimmed);
+    setBarcodeInput('');
+    barcodeInputRef?.current?.focus();
+  };
 
   return (
     <aside className="w-96 lg:w-[420px] bg-white flex flex-col h-full shadow-xl border-l border-slate-200 z-10">
@@ -159,13 +197,88 @@ export default function ActiveCart({
           )}
         </div>
 
-        {/* Limit Warning for Elementary Pupils */}
+        {/* Card Status / Limit / Balance Alerts for Chosen Student */}
+        {selectedCustomer && isCardBlocked && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-800 text-xs">
+            <ShieldAlert size={15} className="text-red-600 flex-shrink-0" />
+            <span className="text-[11px] leading-tight">
+              <strong>Card {selectedCustomer.status === 'lost_card' ? 'Frozen (Lost)' : selectedCustomer.status}:</strong> Cashless RFID checkout is blocked for this student.
+            </span>
+          </div>
+        )}
+
         {selectedCustomer && isLimitExceeded && (
           <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-amber-800 text-xs">
             <AlertTriangle size={15} className="text-amber-600 flex-shrink-0" />
             <span className="text-[11px] leading-tight">
-              <strong>Limit Alert:</strong> Pupil exceeds daily spending allowance (Cap: {formatMoney(selectedCustomer.dailyLimit)}).
+              <strong>Limit Alert:</strong> Pupil exceeds daily spending allowance (Remaining: {formatMoney(remainingDailyLimit)}).
             </span>
+          </div>
+        )}
+
+        {selectedCustomer && !isLimitExceeded && isBalanceInsufficient && (
+          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-amber-800 text-xs">
+            <AlertTriangle size={15} className="text-amber-600 flex-shrink-0" />
+            <span className="text-[11px] leading-tight">
+              <strong>Low Card Balance:</strong> Total exceeds student&apos;s balance ({formatMoney(selectedCustomer.balance)}). Cash checkout still allowed.
+            </span>
+          </div>
+        )}
+
+        {/* Barcode Scanner Quick-Add Bar for Chosen Buyer */}
+        {onBarcodeScan && (
+          <div className="mt-2.5 pt-2.5 border-t border-slate-200/70 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                <Barcode size={14} className="text-[#5c1516]" />
+                Barcode Scan
+              </span>
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="truncate max-w-[170px]">
+                  For: <strong className="text-slate-700">{selectedCustomer ? selectedCustomer.name : 'Walk-in'}</strong>
+                </span>
+              </span>
+            </div>
+
+            <form onSubmit={handleBarcodeSubmit} className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <Barcode size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <Input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  placeholder="Scan or enter product barcode..."
+                  className="h-8 pl-8 pr-2 text-xs font-mono bg-white border-slate-200 rounded-lg focus-visible:ring-1 focus-visible:ring-[#5c1516]"
+                />
+              </div>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!barcodeInput.trim()}
+                className="h-8 px-3 text-xs font-bold bg-[#5c1516] hover:bg-[#7a1420] text-white rounded-lg shrink-0 disabled:opacity-40"
+              >
+                Add
+              </Button>
+            </form>
+
+            {lastScanFeedback && (
+              <div
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1.5 animate-in fade-in duration-150 ${
+                  lastScanFeedback.status === 'success'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-red-50 border border-red-200 text-red-800'
+                }`}
+              >
+                {lastScanFeedback.status === 'success' ? (
+                  <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertTriangle size={13} className="text-red-600 shrink-0" />
+                )}
+                <span className="truncate">{lastScanFeedback.message}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -224,6 +337,7 @@ export default function ActiveCart({
                   {/* Quantity Controls */}
                   <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-1.5 py-1 rounded-lg shadow-2xs">
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(product.id, Math.max(1, quantity - 1))}
                       className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                     >
@@ -233,8 +347,10 @@ export default function ActiveCart({
                       {quantity}
                     </span>
                     <button
+                      type="button"
+                      disabled={product.stock !== undefined && quantity >= product.stock}
                       onClick={() => onUpdateQuantity(product.id, quantity + 1)}
-                      className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                      className="w-5 h-5 rounded flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       <Plus size={12} />
                     </button>
